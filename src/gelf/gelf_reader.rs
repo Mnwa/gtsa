@@ -45,11 +45,6 @@ impl Handler<GelfMessage> for GelfReaderActor {
     type Result = JsonResult<GelfReader>;
 
     fn handle(&mut self, msg: GelfMessage, _ctx: &mut Self::Context) -> Self::Result {
-        let mut buf = msg.0;
-        let buf_last_i = buf.len()-1;
-        if buf[buf_last_i] == 0 {
-            buf.truncate(buf_last_i)
-        }
-        GelfReader::from_slice(buf.as_slice())
+        GelfReader::from_slice(msg.0.as_slice())
     }
 }

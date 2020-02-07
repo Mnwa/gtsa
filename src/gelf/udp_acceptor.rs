@@ -85,7 +85,10 @@ impl StreamHandler<UdpPacket> for UdpActor {
                     reader.print();
                 }
                 Err(e) => {
-                    eprintln!("udp parsing gelf error: {}\nOriginal response: {:?}", e, &parsed_data)
+                    match std::str::from_utf8(&parsed_data) {
+                        Ok(s) => eprintln!("udp parsing gelf error: {}\nOriginal response: {:?}", e, s),
+                        Err(_e) => eprintln!("udp parsing gelf error: {}\nOriginal response: {:?}", e, &parsed_data),
+                    }
                 }
             };
         }.into_actor(self));

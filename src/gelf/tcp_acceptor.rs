@@ -40,9 +40,9 @@ impl StreamHandler<TcpPacket> for TcpActor {
         let reader_actor = self.reader.clone();
 
         ctx.spawn(async move {
+            let mut buf = Vec::new();
             loop {
-                let mut buf = vec![0; 1024];
-                let n = match socket.read(&mut buf).await {
+                match socket.read_to_end(&mut buf).await {
                     // socket closed
                     Ok(n) if n == 0 => return,
                     Ok(n) => n,
@@ -52,28 +52,36 @@ impl StreamHandler<TcpPacket> for TcpActor {
                     }
                 };
 
-                buf.truncate(n);
+                let buf_last_i = buf.len()-1;
+                if buf[buf_last_i] == 0 {
+                    buf.truncate(buf_last_i);
 
-                let gelf_msg = GelfMessage{
-                    0: buf.clone()
-                };
+                    let gelf_msg = GelfMessage{
+                        0: buf.clone()
+                    };
 
-                let reader = match reader_actor.send(gelf_msg).await {
-                    Ok(ug) => ug,
-                    Err(e) => {
-                        eprintln!("gelf actor mailing error: {}", e);
-                        return
-                    }
-                };
+                    let reader = match reader_actor.send(gelf_msg).await {
+                        Ok(ug) => ug,
+                        Err(e) => {
+                            eprintln!("gelf actor mailing error: {}", e);
+                            return
+                        }
+                    };
 
-                match reader {
-                    Ok(reader) => {
-                        reader.print();
-                    }
-                    Err(e) => {
-                        eprintln!("tcp parsing gelf error: {}\nOriginal response: {:?}", e, &buf)
-                    }
-                };
+                    match reader {
+                        Ok(reader) => {
+                            reader.print();
+                        }
+                        Err(e) => {
+                            match std::str::from_utf8(&buf) {
+                                Ok(s) => eprintln!("tcp parsing gelf error: {}\nOriginal response: {:?}", e, s),
+                                Err(_e) => eprintln!("tcp parsing gelf error: {}\nOriginal response: {:?}", e, &buf),
+                            }
+                        }
+                    };
+
+                    buf.clear()
+                }
             }
         }.into_actor(self));
     }

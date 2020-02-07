@@ -5,20 +5,34 @@ use crate::gelf::unpacking::{UnPackActor, UnpackMessage};
 use crate::gelf::gelf_reader::{GelfReaderActor, GelfMessage};
 use tokio::net::{ToSocketAddrs, UdpSocket};
 use std::net::SocketAddr;
+use crate::gelf::gelf_message_printer::GelfProcessorMessage;
 
-pub async fn new_udp_acceptor<T>(bind_addr: T) -> Addr<UdpActor>
-where T: ToSocketAddrs{
+pub async fn new_udp_acceptor<T, A>(bind_addr: T, gelf_processor: Addr<A>) -> Addr<UdpActor<A>>
+    where
+        T: ToSocketAddrs,
+        A: Actor<Context = Context<A>>,
+        A: Handler<GelfProcessorMessage>,
+{
     let socket = UdpSocket::bind(bind_addr).await.unwrap();
     let (recv, _) = socket.split();
-    UdpActor::new(recv)
+    UdpActor::new(recv, gelf_processor)
 }
 
-pub struct UdpActor {
+pub struct UdpActor<T>
+    where
+        T: Actor<Context = Context<T>>,
+        T: Handler<GelfProcessorMessage>,
+{
     unpacker: Addr<UnPackActor>,
-    reader: Addr<GelfReaderActor>
+    reader: Addr<GelfReaderActor>,
+    gelf_processor: Addr<T>,
 }
-impl UdpActor {
-    pub fn new(recv: RecvHalf) -> Addr<UdpActor> {
+impl <T>UdpActor<T>
+    where
+        T: Actor<Context = Context<T>>,
+        T: Handler<GelfProcessorMessage>,
+{
+    pub fn new(recv: RecvHalf, gelf_processor: Addr<T>) -> Addr<UdpActor<T>> {
         UdpActor::create(|ctx| {
             ctx.add_stream(read_many(recv).map(|(buf, addr)| {
                 UdpPacket(buf, addr)
@@ -26,11 +40,16 @@ impl UdpActor {
             UdpActor{
                 unpacker: UnPackActor::new(),
                 reader: GelfReaderActor::new(),
+                gelf_processor,
             }
         })
     }
 }
-impl Actor for UdpActor {
+impl <T>Actor for UdpActor<T>
+    where
+        T: Actor<Context = Context<T>>,
+        T: Handler<GelfProcessorMessage>,
+{
     type Context = Context<Self>;
 }
 
@@ -39,7 +58,11 @@ impl Message for UdpPacket {
     type Result = Vec<u8>;
 }
 
-impl StreamHandler<UdpPacket> for UdpActor {
+impl <T: 'static>StreamHandler<UdpPacket> for UdpActor<T>
+    where
+        T: Actor<Context = Context<T>>,
+        T: Handler<GelfProcessorMessage>,
+{
     fn handle(&mut self, msg: UdpPacket, ctx: &mut Context<Self>) {
         let buf = msg.0;
         let packed_buf = UnpackMessage{
@@ -48,6 +71,7 @@ impl StreamHandler<UdpPacket> for UdpActor {
 
         let requested_buf = self.unpacker.send(packed_buf);
         let reader_actor = self.reader.clone();
+        let processor_actor = self.gelf_processor.clone();
 
         ctx.spawn(async move {
             let unpacked_buf = match requested_buf.await {
@@ -82,7 +106,16 @@ impl StreamHandler<UdpPacket> for UdpActor {
 
             match reader {
                 Ok(reader) => {
-                    reader.print();
+                    let printer_message = GelfProcessorMessage {
+                        0: reader
+                    };
+                    match processor_actor.send(printer_message).await {
+                        Ok(ug) => ug,
+                        Err(e) => {
+                            eprintln!("gelf actor processing error: {}", e);
+                            return;
+                        }
+                    };
                 }
                 Err(e) => {
                     match std::str::from_utf8(&parsed_data) {

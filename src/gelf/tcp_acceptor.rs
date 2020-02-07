@@ -5,14 +5,18 @@ use tokio::prelude::*;
 use tokio::net::{TcpListener, ToSocketAddrs, TcpStream};
 use crate::gelf::gelf_message_printer::GelfProcessorMessage;
 
-pub async fn new_tcp_acceptor<T, A>(bind_addr: T, gelf_processor: Addr<A>) -> Addr<TcpActor<A>>
+pub async fn new_tcp_acceptor<T, A>(
+    bind_addr: T,
+    gelf_processor: Addr<A>,
+    reader: Addr<GelfReaderActor>,
+)
     where
         T: ToSocketAddrs,
         A: Actor<Context = Context<A>>,
         A: Handler<GelfProcessorMessage>,
 {
     let listener = TcpListener::bind(bind_addr).await.unwrap();
-    TcpActor::new(listener, gelf_processor)
+    TcpActor::new(listener, gelf_processor, reader);
 }
 
 pub struct TcpActor<T>
@@ -29,13 +33,17 @@ impl<T> TcpActor<T>
         T: Actor<Context = Context<T>>,
         T: Handler<GelfProcessorMessage>,
 {
-    pub fn new(listener: TcpListener, gelf_processor: Addr<T>) -> Addr<TcpActor<T>> {
+    pub fn new(
+        listener: TcpListener,
+        gelf_processor: Addr<T>,
+        reader: Addr<GelfReaderActor>,
+    ) -> Addr<TcpActor<T>> {
         TcpActor::create(|ctx| {
             ctx.add_stream(read_many(listener).map(|socket| {
                 TcpPacket(socket)
             }));
             TcpActor {
-                reader: GelfReaderActor::new(),
+                reader,
                 gelf_processor,
             }
         })

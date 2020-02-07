@@ -4,20 +4,24 @@ use gelf::udp_acceptor;
 use gelf::tcp_acceptor;
 use actix::System;
 use crate::gelf::gelf_message_printer::GelfPrinterActor;
+use crate::gelf::gelf_reader::GelfReaderActor;
+use crate::gelf::unpacking::UnPackActor;
 
 fn main() {
     let system = System::new("dada");
-    actix::spawn(async move {
-        udp_acceptor::new_udp_acceptor(
-            "0.0.0.0:8080".to_string(),
-            GelfPrinterActor::new(),
-        ).await;
-    });
-    actix::spawn(async move {
-        tcp_acceptor::new_tcp_acceptor(
-            "0.0.0.0:8081".to_string(),
-            GelfPrinterActor::new(),
-        ).await;
-    });
+    let gelf_reader = GelfReaderActor::new();
+    let gelf_unpacker = UnPackActor::new();
+    let gelf_printer = GelfPrinterActor::new();
+    actix::spawn(udp_acceptor::new_udp_acceptor(
+        "0.0.0.0:8080".to_string(),
+        gelf_printer.clone(),
+        gelf_reader.clone(),
+        gelf_unpacker.clone(),
+    ));
+    actix::spawn(tcp_acceptor::new_tcp_acceptor(
+        "0.0.0.0:8081".to_string(),
+        gelf_printer.clone(),
+        gelf_reader.clone(),
+    ));
     system.run().unwrap();
 }

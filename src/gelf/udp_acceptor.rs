@@ -7,7 +7,12 @@ use tokio::net::{ToSocketAddrs, UdpSocket};
 use std::net::SocketAddr;
 use crate::gelf::gelf_message_printer::GelfProcessorMessage;
 
-pub async fn new_udp_acceptor<T, A>(bind_addr: T, gelf_processor: Addr<A>) -> Addr<UdpActor<A>>
+pub async fn new_udp_acceptor<T, A>(
+    bind_addr: T,
+    gelf_processor: Addr<A>,
+    reader: Addr<GelfReaderActor>,
+    unpacker: Addr<UnPackActor>,
+)
     where
         T: ToSocketAddrs,
         A: Actor<Context = Context<A>>,
@@ -15,7 +20,7 @@ pub async fn new_udp_acceptor<T, A>(bind_addr: T, gelf_processor: Addr<A>) -> Ad
 {
     let socket = UdpSocket::bind(bind_addr).await.unwrap();
     let (recv, _) = socket.split();
-    UdpActor::new(recv, gelf_processor)
+    UdpActor::new(recv, gelf_processor, reader, unpacker);
 }
 
 pub struct UdpActor<T>
@@ -32,14 +37,19 @@ impl <T>UdpActor<T>
         T: Actor<Context = Context<T>>,
         T: Handler<GelfProcessorMessage>,
 {
-    pub fn new(recv: RecvHalf, gelf_processor: Addr<T>) -> Addr<UdpActor<T>> {
+    pub fn new(
+        recv: RecvHalf,
+        gelf_processor: Addr<T>,
+        reader: Addr<GelfReaderActor>,
+        unpacker: Addr<UnPackActor>,
+    ) -> Addr<UdpActor<T>> {
         UdpActor::create(|ctx| {
             ctx.add_stream(read_many(recv).map(|(buf, addr)| {
                 UdpPacket(buf, addr)
             }));
             UdpActor{
-                unpacker: UnPackActor::new(),
-                reader: GelfReaderActor::new(),
+                unpacker,
+                reader,
                 gelf_processor,
             }
         })

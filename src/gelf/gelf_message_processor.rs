@@ -8,6 +8,7 @@ impl Message for GelfProcessorMessage {
 
 pub struct GelfPrinterActor;
 impl GelfPrinterActor {
+    #[allow(dead_code)]
     pub fn new() -> Addr<GelfPrinterActor> {
         SyncArbiter::start(2, || GelfPrinterActor)
     }

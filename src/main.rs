@@ -9,8 +9,8 @@ use crate::gelf::unpacking::UnPackActor;
 
 fn main() {
     let system = System::new("dada");
-    let gelf_reader = GelfReaderActor::new();
-    let gelf_unpacker = UnPackActor::new();
+    let gelf_reader = GelfReaderActor::new(2);
+    let gelf_unpacker = UnPackActor::new(2);
     let gelf_printer = GelfPrinterActor::new();
     actix::spawn(udp_acceptor::new_udp_acceptor(
         "0.0.0.0:8080".to_string(),

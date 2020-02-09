@@ -32,8 +32,8 @@ impl Message for GelfMessage {
 
 pub struct GelfReaderActor;
 impl GelfReaderActor {
-    pub fn new() -> Addr<GelfReaderActor> {
-        SyncArbiter::start(2, || GelfReaderActor)
+    pub fn new(threads: usize) -> Addr<GelfReaderActor> {
+        SyncArbiter::start(threads, || GelfReaderActor)
     }
 }
 

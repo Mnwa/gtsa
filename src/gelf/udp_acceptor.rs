@@ -6,6 +6,7 @@ use crate::gelf::gelf_reader::{GelfReaderActor, GelfMessage};
 use tokio::net::{ToSocketAddrs, UdpSocket};
 use std::net::SocketAddr;
 use crate::gelf::gelf_message_printer::GelfProcessorMessage;
+use std::collections::HashMap;
 
 pub async fn new_udp_acceptor<T, A>(
     bind_addr: T,
@@ -29,6 +30,7 @@ pub struct UdpActor<T>
         T: Handler<GelfProcessorMessage>,
 {
     unpacker: Addr<UnPackActor>,
+    unchanker: Addr<ChunkAcceptor>,
     reader: Addr<GelfReaderActor>,
     gelf_processor: Addr<T>,
 }
@@ -51,6 +53,7 @@ impl <T>UdpActor<T>
                 unpacker,
                 reader,
                 gelf_processor,
+                unchanker: ChunkAcceptor::new(),
             }
         })
     }
@@ -75,24 +78,46 @@ impl <T: 'static>StreamHandler<UdpPacket> for UdpActor<T>
 {
     fn handle(&mut self, msg: UdpPacket, ctx: &mut Context<Self>) {
         let buf = msg.0;
-        let packed_buf = UnpackMessage{
-            0: buf
-        };
 
-        let requested_buf = self.unpacker.send(packed_buf);
         let reader_actor = self.reader.clone();
         let processor_actor = self.gelf_processor.clone();
+        let unpacker_actor = self.unpacker.clone();
+        let unchanker_actor = self.unchanker.clone();
 
         ctx.spawn(async move {
-            let unpacked_buf = match requested_buf.await {
+            let chunked_buf_message = UnpackMessage{
+                0: buf
+            };
+            let unchanked_requested_buf = unchanker_actor.send(chunked_buf_message);
+            let unchanked_result_buf = match unchanked_requested_buf.await {
+                Ok(pd) => pd,
+                Err(e) => {
+                    eprintln!("unchunker actor mailing error: {}", e);
+                    return
+                }
+            };
+            let unchanked_buf = match unchanked_result_buf {
+                Ok(pd) => pd,
+                Err(e) => {
+                    if e.kind() != std::io::ErrorKind::WriteZero {
+                        eprintln!("udp unchunking data error: {}", e);
+                    }
+                    return
+                }
+            };
+
+            let packed_buf_message = UnpackMessage{
+                0: unchanked_buf
+            };
+            let unpacked_requested_buf = unpacker_actor.send(packed_buf_message);
+            let unpacked_result_buf = match unpacked_requested_buf.await {
                 Ok(pd) => pd,
                 Err(e) => {
                     eprintln!("unpacker actor mailing error: {}", e);
                     return
                 }
             };
-
-            let parsed_data = match unpacked_buf {
+            let parsed_data = match unpacked_result_buf {
                 Ok(pd) => pd,
                 Err(e) => {
                     if e.kind() != std::io::ErrorKind::WriteZero {
@@ -152,4 +177,87 @@ fn read_many(recv: RecvHalf) -> impl Stream<Item = RecvData> {
             Some(((buf, addr), recv))
         }
     })
+}
+
+struct ChunkAcceptor {
+    chunked_messages: HashMap<String, Vec<MessageChunk>>,
+}
+
+impl ChunkAcceptor {
+    fn new() -> Addr<ChunkAcceptor> {
+        ChunkAcceptor::create(|_| ChunkAcceptor {
+            chunked_messages: HashMap::new(),
+        })
+    }
+}
+
+impl Actor for ChunkAcceptor {
+    type Context = Context<Self>;
+}
+
+impl Handler<UnpackMessage> for ChunkAcceptor {
+    type Result = std::io::Result<Vec<u8>>;
+
+    fn handle(&mut self, msg: UnpackMessage, _ctx: &mut Self::Context) -> Self::Result {
+        let mut parsed_buf = Vec::new();
+        let buf = msg.0.as_slice();
+
+        if is_chunk(buf) {
+            let chunk = MessageChunk::new(buf);
+
+            let message_id = chunk.message_id.clone();
+
+            match self.chunked_messages.get_mut(&message_id) {
+                Some(chunks) => {
+                    let sequence_count = chunk.sequence_count.clone();
+                    chunks.push(chunk);
+                    if sequence_count == chunks.len() as u8 {
+                        chunks.sort_by(|a,b| {
+                            a.sequence_number.partial_cmp(&b.sequence_number).unwrap()
+                        });
+
+                        for chunk in chunks {
+                            parsed_buf.append(&mut chunk.message_chunk);
+                        }
+
+                        return Ok(parsed_buf);
+                    }
+                }
+                None => {
+                    self.chunked_messages.insert(message_id, vec![chunk]);
+                }
+            }
+
+            return Err(std::io::Error::from(std::io::ErrorKind::WriteZero))
+        }
+        Ok(parsed_buf)
+    }
+}
+
+struct MessageChunk {
+    message_id: String,
+    sequence_number: u8,
+    sequence_count: u8,
+    message_chunk: Vec<u8>
+}
+
+impl MessageChunk {
+    fn new(buf: &[u8]) -> MessageChunk {
+        MessageChunk {
+            message_id: std::string::String::from_utf8_lossy(&buf[2..9]).to_string(),
+            sequence_number: buf[10],
+            sequence_count: buf[11],
+            message_chunk: Vec::from(&buf[12..]),
+        }
+    }
+}
+
+fn is_chunk(buf: &[u8]) -> bool {
+    if buf.len() <= 2 {
+        return false
+    }
+    if !(buf[0] == 30 && buf[1] == 15) {
+        return false
+    }
+    return true
 }

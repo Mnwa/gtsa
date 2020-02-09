@@ -3,7 +3,7 @@ mod gelf;
 use gelf::udp_acceptor;
 use gelf::tcp_acceptor;
 use actix::System;
-use crate::gelf::gelf_message_printer::GelfPrinterActor;
+use crate::gelf::gelf_message_processor::GelfPrinterActor;
 use crate::gelf::gelf_reader::GelfReaderActor;
 use crate::gelf::unpacking::UnPackActor;
 

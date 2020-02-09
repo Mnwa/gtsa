@@ -5,8 +5,9 @@ use crate::gelf::unpacking::{UnPackActor, UnpackMessage};
 use crate::gelf::gelf_reader::{GelfReaderActor, GelfMessage};
 use tokio::net::{ToSocketAddrs, UdpSocket};
 use std::net::SocketAddr;
-use crate::gelf::gelf_message_printer::GelfProcessorMessage;
+use crate::gelf::gelf_message_processor::GelfProcessorMessage;
 use std::collections::HashMap;
+use actix::dev::ToEnvelope;
 
 pub async fn new_udp_acceptor<T, A>(
     bind_addr: T,
@@ -16,8 +17,8 @@ pub async fn new_udp_acceptor<T, A>(
 )
     where
         T: ToSocketAddrs,
-        A: Actor<Context = Context<A>>,
-        A: Handler<GelfProcessorMessage>,
+        A: Actor + Handler<GelfProcessorMessage>,
+        A::Context: ToEnvelope<A, GelfProcessorMessage>
 {
     let socket = UdpSocket::bind(bind_addr).await.unwrap();
     let (recv, _) = socket.split();
@@ -26,8 +27,8 @@ pub async fn new_udp_acceptor<T, A>(
 
 pub struct UdpActor<T>
     where
-        T: Actor<Context = Context<T>>,
-        T: Handler<GelfProcessorMessage>,
+        T: Actor + Handler<GelfProcessorMessage>,
+        T::Context: ToEnvelope<T, GelfProcessorMessage>
 {
     unpacker: Addr<UnPackActor>,
     unchanker: Addr<ChunkAcceptor>,
@@ -36,8 +37,8 @@ pub struct UdpActor<T>
 }
 impl <T>UdpActor<T>
     where
-        T: Actor<Context = Context<T>>,
-        T: Handler<GelfProcessorMessage>,
+        T: Actor + Handler<GelfProcessorMessage>,
+        T::Context: ToEnvelope<T, GelfProcessorMessage>
 {
     pub fn new(
         recv: RecvHalf,
@@ -60,8 +61,8 @@ impl <T>UdpActor<T>
 }
 impl <T>Actor for UdpActor<T>
     where
-        T: Actor<Context = Context<T>>,
-        T: Handler<GelfProcessorMessage>,
+        T: Actor + Handler<GelfProcessorMessage>,
+        T::Context: ToEnvelope<T, GelfProcessorMessage>
 {
     type Context = Context<Self>;
 }
@@ -73,8 +74,8 @@ impl Message for UdpPacket {
 
 impl <T: 'static>StreamHandler<UdpPacket> for UdpActor<T>
     where
-        T: Actor<Context = Context<T>>,
-        T: Handler<GelfProcessorMessage>,
+        T: Actor + Handler<GelfProcessorMessage>,
+        T::Context: ToEnvelope<T, GelfProcessorMessage>
 {
     fn handle(&mut self, msg: UdpPacket, ctx: &mut Context<Self>) {
         let buf = msg.0;

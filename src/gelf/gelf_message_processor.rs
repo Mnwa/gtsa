@@ -9,12 +9,12 @@ impl Message for GelfProcessorMessage {
 pub struct GelfPrinterActor;
 impl GelfPrinterActor {
     pub fn new() -> Addr<GelfPrinterActor> {
-        GelfPrinterActor.start()
+        SyncArbiter::start(2, || GelfPrinterActor)
     }
 }
 
 impl Actor for GelfPrinterActor {
-    type Context = Context<Self>;
+    type Context = SyncContext<Self>;
 }
 
 impl Handler<GelfProcessorMessage> for GelfPrinterActor {

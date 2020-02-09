@@ -3,7 +3,8 @@ use futures::prelude::*;
 use crate::gelf::gelf_reader::{GelfMessage, GelfReaderActor};
 use tokio::prelude::*;
 use tokio::net::{TcpListener, ToSocketAddrs, TcpStream};
-use crate::gelf::gelf_message_printer::GelfProcessorMessage;
+use crate::gelf::gelf_message_processor::GelfProcessorMessage;
+use actix::dev::ToEnvelope;
 
 pub async fn new_tcp_acceptor<T, A>(
     bind_addr: T,
@@ -12,8 +13,8 @@ pub async fn new_tcp_acceptor<T, A>(
 )
     where
         T: ToSocketAddrs,
-        A: Actor<Context = Context<A>>,
-        A: Handler<GelfProcessorMessage>,
+        A: Actor + Handler<GelfProcessorMessage>,
+        A::Context: ToEnvelope<A, GelfProcessorMessage>
 {
     let listener = TcpListener::bind(bind_addr).await.unwrap();
     TcpActor::new(listener, gelf_processor, reader);
@@ -21,8 +22,8 @@ pub async fn new_tcp_acceptor<T, A>(
 
 pub struct TcpActor<T>
     where
-        T: Actor<Context = Context<T>>,
-        T: Handler<GelfProcessorMessage>,
+        T: Actor + Handler<GelfProcessorMessage>,
+        T::Context: ToEnvelope<T, GelfProcessorMessage>
 {
     reader: Addr<GelfReaderActor>,
     gelf_processor: Addr<T>,
@@ -30,8 +31,8 @@ pub struct TcpActor<T>
 
 impl<T> TcpActor<T>
     where
-        T: Actor<Context = Context<T>>,
-        T: Handler<GelfProcessorMessage>,
+        T: Actor + Handler<GelfProcessorMessage>,
+        T::Context: ToEnvelope<T, GelfProcessorMessage>
 {
     pub fn new(
         listener: TcpListener,
@@ -52,8 +53,8 @@ impl<T> TcpActor<T>
 
 impl<T> Actor for TcpActor<T>
     where
-        T: Actor<Context = Context<T>>,
-        T: Handler<GelfProcessorMessage>,
+        T: Actor + Handler<GelfProcessorMessage>,
+        T::Context: ToEnvelope<T, GelfProcessorMessage>
 {
     type Context = Context<Self>;
 }
@@ -66,8 +67,8 @@ impl Message for TcpPacket {
 
 impl<T: 'static> StreamHandler<TcpPacket> for TcpActor<T>
     where
-        T: Actor<Context = Context<T>>,
-        T: Handler<GelfProcessorMessage>,
+        T: Actor + Handler<GelfProcessorMessage>,
+        T::Context: ToEnvelope<T, GelfProcessorMessage>
 {
     fn handle(&mut self, msg: TcpPacket, ctx: &mut Context<Self>) {
         let mut socket = msg.0;

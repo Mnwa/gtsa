@@ -1,9 +1,10 @@
 use actix::prelude::*;
 use crate::gelf::gelf_reader::{GelfReader};
+use serde_json::Value;
 
 pub struct GelfProcessorMessage(pub GelfReader);
 impl Message for GelfProcessorMessage {
-    type Result = ();
+    type Result = Option<Value>;
 }
 
 pub struct GelfPrinterActor;
@@ -19,9 +20,10 @@ impl Actor for GelfPrinterActor {
 }
 
 impl Handler<GelfProcessorMessage> for GelfPrinterActor {
-    type Result = ();
+    type Result = Option<Value>;
 
     fn handle(&mut self, msg: GelfProcessorMessage, _ctx: &mut Self::Context) -> Self::Result {
-        msg.0.print()
+        msg.0.print();
+        None
     }
 }

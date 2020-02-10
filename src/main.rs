@@ -22,7 +22,7 @@ fn main() {
     let system = System::new(system_name);
     let gelf_reader = GelfReaderActor::new(reader_threads);
     let gelf_unpacker = UnPackActor::new(unpacker_threads);
-    let gelf_sentry_processor = SentryProcessorActor::new(dsn);
+    let gelf_sentry_processor = SentryProcessorActor::new(dsn, reader_threads);
     let _gelf_printer = GelfPrinterActor::new();
     actix::spawn(udp_acceptor::new_udp_acceptor(
         udp_addr.to_string(),

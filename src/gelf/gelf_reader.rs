@@ -70,10 +70,19 @@ pub struct GelfData {
     pub timestamp: f64,
     pub version: String,
     pub meta: Map<String, Value>,
+    pub mechanism_data: Map<String, Value>,
 }
 
 fn to_gelf(data: Map<String, Value>) -> Option<GelfData> {
     let mut meta = Map::new();
+    let mut mechanism_data = Map::new();
+    let gelf_fields: [String; 5] = [
+        "host".to_owned(),
+        "level".to_owned(),
+        "short_message".to_owned(),
+        "timestamp".to_owned(),
+        "version".to_owned(),
+    ];
     data
         .iter()
         .for_each(|(k, v)| {
@@ -82,6 +91,11 @@ fn to_gelf(data: Map<String, Value>) -> Option<GelfData> {
                 meta.insert(
                     str_k[1..].to_owned(),
                     v.to_owned()
+                );
+            } else if !gelf_fields.contains(k) {
+                mechanism_data.insert(
+                    str_k.to_owned(),
+                    v.to_owned(),
                 );
             }
         });
@@ -93,5 +107,6 @@ fn to_gelf(data: Map<String, Value>) -> Option<GelfData> {
         timestamp: data.get("timestamp")?.as_f64()?,
         version: data.get("version")?.to_string(),
         meta,
+        mechanism_data,
     })
 }

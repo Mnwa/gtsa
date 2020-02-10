@@ -66,6 +66,10 @@ impl Handler<GelfProcessorMessage> for SentryProcessorActor {
         data.push(json!({
             "value": gelf_msg.short_message,
             "type": "GelfException",
+            "mechanism": {
+                "type": "generic",
+                "data": gelf_msg.mechanism_data
+            }
         }));
 
         let request = json!({

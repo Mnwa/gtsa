@@ -221,6 +221,8 @@ impl Handler<UnpackMessage> for ChunkAcceptor {
                             parsed_buf.append(&mut chunk.message_chunk);
                         }
 
+                        self.chunked_messages.remove(&message_id);
+
                         return Ok(parsed_buf);
                     }
                 }

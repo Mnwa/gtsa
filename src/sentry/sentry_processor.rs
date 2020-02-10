@@ -5,9 +5,11 @@ use serde_json::{json, Value};
 use crate::gelf::gelf_message_processor::GelfProcessorMessage;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::borrow::Borrow;
+use reqwest::Client;
 
 pub struct SentryProcessorActor {
-    dsn: Dsn
+    dsn: Dsn,
+    client: Client,
 }
 
 impl SentryProcessorActor {
@@ -25,7 +27,8 @@ impl SentryProcessorActor {
                 pub_key,
                 host,
                 project,
-            }
+            },
+            client: Client::new(),
         })
     }
 }
@@ -66,6 +69,7 @@ impl Handler<GelfProcessorMessage> for SentryProcessorActor {
         }));
 
         let request = json!({
+            "event_id": uuid::Uuid::new_v4(),
             "server_name": gelf_msg.host,
             "timestamp": gelf_msg.timestamp,
             "level": level,
@@ -74,15 +78,14 @@ impl Handler<GelfProcessorMessage> for SentryProcessorActor {
             }
         });
 
-        let client = reqwest::Client::new();
-        let req = client
+        let req = self.client
             .post(url.as_str())
             .json(request.borrow());
 
         ctx.spawn(async move {
             match req.send().await {
                 Ok(r) => {
-                    println!("{}", r.text().await.unwrap());
+                    println!("sentry response: {}", r.text().await.unwrap());
                     return
                 },
                 Err(e) => {

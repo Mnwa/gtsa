@@ -1,10 +1,14 @@
 [package]
-name = "gelf-receiver"
+name = "gtsa"
 version = "0.1.0"
 authors = ["Mnwa <mihan@panfilov.biz>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

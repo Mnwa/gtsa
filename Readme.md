@@ -51,7 +51,7 @@ We use [SemVer](http://semver.org/) for versioning. For the versions available, 
 
 ## Authors
 
-* **Mikhail Panfilov** - *Initial work* - [PurpleBooth](https://github.com/Mnwa)
+* **Mikhail Panfilov** - *Initial work* - [Mnwa](https://github.com/Mnwa)
 
 See also the list of [contributors](https://github.com/Mnwa/gtsa/contributors) who participated in this project.
 

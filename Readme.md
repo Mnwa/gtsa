@@ -19,6 +19,12 @@ cargo install --path .
 gtsa
 ```
 
+Docker hub
+```bash
+docker pull mnwamnowich/gtsa
+docker run -p 8080:8080/udp --env SENTRY_DSN=dsn --name gtsa mnwamnowich/gtsa
+```
+
 Or docker build
 
 ```bash
@@ -30,9 +36,20 @@ Now you can sent data on udp
 
 ## Deployment
 
-The simplest way to deploy that app is pull your docker container and run it with env:
+For deploying GTSA you must to set is only one env variable:
 ```env
 SENTRY_DSN=xxx
+```
+
+SENTRY DSN must be only in the new format (without secret key)!
+
+Also GTSA have a some env variables with default values, but you can edit it:
+```env
+UDP_ADDR=0.0.0.0:8080 //udp address
+TCP_ADDR=0.0.0.0:8081 // tcp address
+SYSTEM=Gelf Mover // name of your application
+READER_THREADS=1 // threads for decoding and encoding json messages (max parrallel messages processing)
+UNPACKER_THREADS=1 // threads for unpacking messages what received with gz or zlib algoritms (max parrallel messages unpacking)
 ```
 
 ## Built With

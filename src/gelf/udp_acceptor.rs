@@ -6,14 +6,17 @@ use crate::gelf::gelf_reader::{GelfReaderActor, GelfMessage};
 use tokio::net::{ToSocketAddrs, UdpSocket};
 use std::net::SocketAddr;
 use crate::gelf::gelf_message_processor::GelfProcessorMessage;
-use std::collections::HashMap;
 use actix::dev::ToEnvelope;
+
+extern crate lru;
+use lru::LruCache;
 
 pub async fn new_udp_acceptor<T, A>(
     bind_addr: T,
     gelf_processor: Addr<A>,
     reader: Addr<GelfReaderActor>,
     unpacker: Addr<UnPackActor>,
+    max_parallel_chunks: usize,
 )
     where
         T: ToSocketAddrs,
@@ -22,7 +25,7 @@ pub async fn new_udp_acceptor<T, A>(
 {
     let socket = UdpSocket::bind(bind_addr).await.unwrap();
     let (recv, _) = socket.split();
-    UdpActor::new(recv, gelf_processor, reader, unpacker);
+    UdpActor::new(recv, gelf_processor, reader, unpacker, max_parallel_chunks);
 }
 
 pub struct UdpActor<T>
@@ -45,6 +48,7 @@ impl <T>UdpActor<T>
         gelf_processor: Addr<T>,
         reader: Addr<GelfReaderActor>,
         unpacker: Addr<UnPackActor>,
+        max_parallel_chunks: usize,
     ) -> Addr<UdpActor<T>> {
         UdpActor::create(|ctx| {
             ctx.add_stream(read_many(recv).map(|(buf, addr)| {
@@ -54,7 +58,7 @@ impl <T>UdpActor<T>
                 unpacker,
                 reader,
                 gelf_processor,
-                unchanker: ChunkAcceptor::new(),
+                unchanker: ChunkAcceptor::new(max_parallel_chunks),
             }
         })
     }
@@ -181,13 +185,13 @@ fn read_many(recv: RecvHalf) -> impl Stream<Item = RecvData> {
 }
 
 struct ChunkAcceptor {
-    chunked_messages: HashMap<String, Vec<MessageChunk>>,
+    chunked_messages: LruCache<String, Vec<MessageChunk>>,
 }
 
 impl ChunkAcceptor {
-    fn new() -> Addr<ChunkAcceptor> {
+    fn new(max_parallel_chunks: usize) -> Addr<ChunkAcceptor> {
         ChunkAcceptor::create(|_| ChunkAcceptor {
-            chunked_messages: HashMap::new(),
+            chunked_messages: LruCache::new(max_parallel_chunks),
         })
     }
 }
@@ -221,13 +225,13 @@ impl Handler<UnpackMessage> for ChunkAcceptor {
                             parsed_buf.append(&mut chunk.message_chunk);
                         }
 
-                        self.chunked_messages.remove(&message_id);
+                        self.chunked_messages.pop(&message_id);
 
                         return Ok(parsed_buf);
                     }
                 }
                 None => {
-                    self.chunked_messages.insert(message_id, vec![chunk]);
+                    self.chunked_messages.put(message_id, vec![chunk]);
                 }
             }
 

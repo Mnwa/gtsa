@@ -21,6 +21,7 @@ fn main() {
 
     let reader_threads: usize = env::var("READER_THREADS").unwrap_or("1".to_owned()).parse().unwrap();
     let unpacker_threads: usize = env::var("UNPACKER_THREADS").unwrap_or("1".to_owned()).parse().unwrap();
+    let max_parallel_chunks: usize = std::env::var("MAX_PARALLEL_CHUNKS").unwrap_or("100000".to_owned()).parse().unwrap();
 
     let system = System::new(system_name);
     let gelf_reader = GelfReaderActor::new(reader_threads);
@@ -32,6 +33,7 @@ fn main() {
         gelf_sentry_processor.clone(),
         gelf_reader.clone(),
         gelf_unpacker.clone(),
+        max_parallel_chunks
     ));
     actix::spawn(tcp_acceptor::new_tcp_acceptor(
         tcp_addr.to_string(),

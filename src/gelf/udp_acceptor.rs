@@ -173,7 +173,7 @@ type RecvData = (Vec<u8>, SocketAddr);
 fn read_many(recv: RecvHalf) -> impl Stream<Item = RecvData> {
     stream::unfold(recv, |mut recv| {
         async {
-            let mut buf = vec![0; 1024];
+            let mut buf = Vec::with_capacity(8192);
             let (n, addr) = match recv.recv_from(&mut buf).await {
                 Ok((n, addr)) => (n, addr),
                 Err(_e) => return None

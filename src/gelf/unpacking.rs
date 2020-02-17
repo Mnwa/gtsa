@@ -35,7 +35,7 @@ impl Handler<UnpackMessage> for UnPackActor {
             let mut gzip_decompressor = GzDecoder::new(buf);
             gzip_decompressor.read_to_end(&mut parsed_buf)?;
         } else {
-            parsed_buf = Vec::from(buf);
+            parsed_buf.copy_from_slice(buf);
         }
         Ok(parsed_buf)
     }

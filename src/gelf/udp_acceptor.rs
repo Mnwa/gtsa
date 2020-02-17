@@ -125,9 +125,7 @@ impl <T: 'static>StreamHandler<UdpPacket> for UdpActor<T>
             let parsed_data = match unpacked_result_buf {
                 Ok(pd) => pd,
                 Err(e) => {
-                    if e.kind() != std::io::ErrorKind::WriteZero {
-                        eprintln!("udp parsing data error: {}", e);
-                    }
+                    eprintln!("udp parsing data error: {}", e);
                     return
                 }
             };
@@ -173,7 +171,7 @@ type RecvData = (Vec<u8>, SocketAddr);
 fn read_many(recv: RecvHalf) -> impl Stream<Item = RecvData> {
     stream::unfold(recv, |mut recv| {
         async {
-            let mut buf = Vec::with_capacity(8192);
+            let mut buf = vec![0; 8196];
             let (n, addr) = match recv.recv_from(&mut buf).await {
                 Ok((n, addr)) => (n, addr),
                 Err(_e) => return None
@@ -204,8 +202,8 @@ impl Handler<UnpackMessage> for ChunkAcceptor {
     type Result = std::io::Result<Vec<u8>>;
 
     fn handle(&mut self, msg: UnpackMessage, _ctx: &mut Self::Context) -> Self::Result {
-        let mut parsed_buf = Vec::new();
         let buf = msg.0.as_slice();
+        let mut parsed_buf = Vec::new();
 
         if is_chunk(buf) {
             let chunk = MessageChunk::new(buf);
@@ -236,6 +234,8 @@ impl Handler<UnpackMessage> for ChunkAcceptor {
             }
 
             return Err(std::io::Error::from(std::io::ErrorKind::WriteZero))
+        } else {
+            parsed_buf = Vec::from(buf)
         }
         Ok(parsed_buf)
     }

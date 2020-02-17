@@ -25,17 +25,19 @@ impl Handler<UnpackMessage> for UnPackActor {
     type Result = std::io::Result<Vec<u8>>;
 
     fn handle(&mut self, msg: UnpackMessage, _ctx: &mut Self::Context) -> Self::Result {
-        let mut parsed_buf = Vec::new();
         let buf = msg.0.as_slice();
+        let mut parsed_buf = Vec::new();
 
         if is_zlib(buf) {
             let mut zlib_decompressor = ZlibDecoder::new(buf);
-            zlib_decompressor.read_to_end(&mut parsed_buf)?;
+            let n = zlib_decompressor.read_to_end(&mut parsed_buf)?;
+            parsed_buf.truncate(n)
         } else if is_gz(buf) {
             let mut gzip_decompressor = GzDecoder::new(buf);
-            gzip_decompressor.read_to_end(&mut parsed_buf)?;
+            let n = gzip_decompressor.read_to_end(&mut parsed_buf)?;
+            parsed_buf.truncate(n)
         } else {
-            parsed_buf.copy_from_slice(buf);
+            parsed_buf = Vec::from(buf);
         }
         Ok(parsed_buf)
     }

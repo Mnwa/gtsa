@@ -53,6 +53,18 @@ UNPACKER_THREADS=1 // threads for unpacking messages what received with gz or zl
 MAX_PARALLEL_CHUNKS=100000 // maximum chunked messages what GTSA can processing, old messages will be flush (udp only)
 ```
 
+## Examples
+
+### Sending udp message
+```bash
+ echo -n -e '{ "version": "1.1", "host": "example.org", "short_message": "A short message", "level": 5, "_some_info": "foo", "timestamp": 1582213226}'"" | nc -w0 -u 0.0.0.0 8080
+```
+
+### Sending tcp message
+```bash
+echo -n -e '{ "version": "1.1", "host": "example.org", "short_message": "A short message", "level": 5, "_some_info": "foo", "timestamp": 1582213226}'"\0" | nc -w0 0.0.0.0 8081
+```
+
 ## Built With
 
 * [actix](https://github.com/actix/actix) - The actor framework used

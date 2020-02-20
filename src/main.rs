@@ -4,24 +4,32 @@ use std::env;
 mod gelf;
 mod sentry;
 
-use gelf::udp_acceptor;
-use gelf::tcp_acceptor;
-use gelf::gelf_reader::GelfReaderActor;
-use gelf::unpacking::UnPackActor;
-use crate::sentry::sentry_processor::SentryProcessorActor;
 use crate::gelf::gelf_message_processor::GelfPrinterActor;
+use crate::sentry::sentry_processor::SentryProcessorActor;
+use gelf::gelf_reader::GelfReaderActor;
+use gelf::tcp_acceptor;
+use gelf::udp_acceptor;
+use gelf::unpacking::UnPackActor;
 
 fn main() {
-    let dsn = env::var("SENTRY_DSN").unwrap_or_else(|_e| {
-        panic!("You must to pass SENTRY_DSN variable from env")
-    });
+    let dsn = env::var("SENTRY_DSN")
+        .unwrap_or_else(|_e| panic!("You must to pass SENTRY_DSN variable from env"));
     let udp_addr = env::var("UDP_ADDR").unwrap_or("0.0.0.0:8080".to_owned());
     let tcp_addr = env::var("TCP_ADDR").unwrap_or("0.0.0.0:8081".to_owned());
     let system_name = env::var("SYSTEM").unwrap_or("Gelf Mover".to_owned());
 
-    let reader_threads: usize = env::var("READER_THREADS").unwrap_or("1".to_owned()).parse().unwrap();
-    let unpacker_threads: usize = env::var("UNPACKER_THREADS").unwrap_or("1".to_owned()).parse().unwrap();
-    let max_parallel_chunks: usize = std::env::var("MAX_PARALLEL_CHUNKS").unwrap_or("100000".to_owned()).parse().unwrap();
+    let reader_threads: usize = env::var("READER_THREADS")
+        .unwrap_or("1".to_owned())
+        .parse()
+        .unwrap();
+    let unpacker_threads: usize = env::var("UNPACKER_THREADS")
+        .unwrap_or("1".to_owned())
+        .parse()
+        .unwrap();
+    let max_parallel_chunks: usize = std::env::var("MAX_PARALLEL_CHUNKS")
+        .unwrap_or("100000".to_owned())
+        .parse()
+        .unwrap();
 
     let system = System::new(system_name);
     let gelf_reader = GelfReaderActor::new(reader_threads);
@@ -33,7 +41,7 @@ fn main() {
         gelf_sentry_processor.clone(),
         gelf_reader.clone(),
         gelf_unpacker.clone(),
-        max_parallel_chunks
+        max_parallel_chunks,
     ));
     actix::spawn(tcp_acceptor::new_tcp_acceptor(
         tcp_addr.to_string(),

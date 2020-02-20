@@ -3,24 +3,20 @@ use scan_fmt::scan_fmt;
 use serde_json::{json, Value};
 
 use crate::gelf::gelf_message_processor::GelfProcessorMessage;
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::borrow::Borrow;
 use reqwest::Client;
+use std::borrow::Borrow;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct SentryProcessorActor {
     dsn: Dsn,
     client: Client,
-    prepare_actor: Addr<PrepareActor>
+    prepare_actor: Addr<PrepareActor>,
 }
 
 impl SentryProcessorActor {
     pub fn new(secret_link: &str, prepare_json_threads: usize) -> Addr<SentryProcessorActor> {
-        let (
-            protocol,
-            pub_key,
-            host,
-            project,
-        ) = scan_fmt!(secret_link, "{}://{}@{}/{}", String, String, String, i32).unwrap();
+        let (protocol, pub_key, host, project) =
+            scan_fmt!(secret_link, "{}://{}@{}/{}", String, String, String, i32).unwrap();
 
         SentryProcessorActor::create(|_| SentryProcessorActor {
             dsn: Dsn {
@@ -47,33 +43,35 @@ impl Handler<GelfProcessorMessage> for SentryProcessorActor {
 
         let prepare_actor = self.prepare_actor.clone();
 
-        let rb = self.client
-            .post(url.as_str());
+        let rb = self.client.post(url.as_str());
 
-        ctx.spawn(async move {
-            let sended_request = prepare_actor.send(msg).await;
-            let request_wrapped = match sended_request {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("mailing prepare request error: {:?}", e);
-                    return
-                }
-            };
-            let request = match request_wrapped {
-                Some(r) => r,
-                None => return
-            };
-            match rb.json(request.borrow()).send().await {
-                Ok(r) => {
-                    println!("sentry response: {}", r.text().await.unwrap());
-                    return
-                },
-                Err(e) => {
-                    eprintln!("request sending for sentry error: {:?}", e);
-                    return
+        ctx.spawn(
+            async move {
+                let sended_request = prepare_actor.send(msg).await;
+                let request_wrapped = match sended_request {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("mailing prepare request error: {:?}", e);
+                        return;
+                    }
+                };
+                let request = match request_wrapped {
+                    Some(r) => r,
+                    None => return,
+                };
+                match rb.json(request.borrow()).send().await {
+                    Ok(r) => {
+                        println!("sentry response: {}", r.text().await.unwrap());
+                        return;
+                    }
+                    Err(e) => {
+                        eprintln!("request sending for sentry error: {:?}", e);
+                        return;
+                    }
                 }
             }
-        }.into_actor(self));
+            .into_actor(self),
+        );
         None
     }
 }
@@ -93,7 +91,10 @@ impl Dsn {
             self.host,
             self.project,
             self.pub_key,
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
         )
     }
 }
@@ -111,8 +112,12 @@ impl Actor for PrepareActor {
 impl Handler<GelfProcessorMessage> for PrepareActor {
     type Result = Option<Value>;
 
-    fn handle(&mut self, msg: GelfProcessorMessage, _ctx: &mut Self::Context) -> Self::Result {
-        let gelf_msg = msg.0.as_gelf();
+    fn handle(
+        &mut self,
+        GelfProcessorMessage(msg): GelfProcessorMessage,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        let gelf_msg = msg.as_gelf();
         let level = match gelf_msg.level {
             0 => "fatal",
             1 => "error",
@@ -128,10 +133,11 @@ impl Handler<GelfProcessorMessage> for PrepareActor {
             }
         };
 
-        let mut data = gelf_msg.meta
-           .iter()
-           .map(|(k, v)| json!({ "value": v, "type": k,}))
-           .collect::<Vec<Value>>();
+        let mut data = gelf_msg
+            .meta
+            .iter()
+            .map(|(k, v)| json!({ "value": v, "type": k,}))
+            .collect::<Vec<Value>>();
 
         data.push(json!({
             "value": gelf_msg.short_message,

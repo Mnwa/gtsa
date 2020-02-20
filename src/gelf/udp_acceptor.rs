@@ -1,12 +1,12 @@
+use crate::gelf::gelf_message_processor::GelfProcessorMessage;
+use crate::gelf::gelf_reader::{GelfMessage, GelfReaderActor};
+use crate::gelf::unpacking::{UnPackActor, UnpackMessage};
+use actix::dev::ToEnvelope;
 use actix::prelude::*;
 use futures::prelude::*;
-use tokio::net::udp::{RecvHalf};
-use crate::gelf::unpacking::{UnPackActor, UnpackMessage};
-use crate::gelf::gelf_reader::{GelfReaderActor, GelfMessage};
-use tokio::net::{ToSocketAddrs, UdpSocket};
 use std::net::SocketAddr;
-use crate::gelf::gelf_message_processor::GelfProcessorMessage;
-use actix::dev::ToEnvelope;
+use tokio::net::udp::RecvHalf;
+use tokio::net::{ToSocketAddrs, UdpSocket};
 
 extern crate lru;
 use lru::LruCache;
@@ -17,11 +17,10 @@ pub async fn new_udp_acceptor<T, A>(
     reader: Addr<GelfReaderActor>,
     unpacker: Addr<UnPackActor>,
     max_parallel_chunks: usize,
-)
-    where
-        T: ToSocketAddrs,
-        A: Actor + Handler<GelfProcessorMessage>,
-        A::Context: ToEnvelope<A, GelfProcessorMessage>
+) where
+    T: ToSocketAddrs,
+    A: Actor + Handler<GelfProcessorMessage>,
+    A::Context: ToEnvelope<A, GelfProcessorMessage>,
 {
     let socket = UdpSocket::bind(bind_addr).await.unwrap();
     let (recv, _) = socket.split();
@@ -29,19 +28,19 @@ pub async fn new_udp_acceptor<T, A>(
 }
 
 pub struct UdpActor<T>
-    where
-        T: Actor + Handler<GelfProcessorMessage>,
-        T::Context: ToEnvelope<T, GelfProcessorMessage>
+where
+    T: Actor + Handler<GelfProcessorMessage>,
+    T::Context: ToEnvelope<T, GelfProcessorMessage>,
 {
     unpacker: Addr<UnPackActor>,
     unchanker: Addr<ChunkAcceptor>,
     reader: Addr<GelfReaderActor>,
     gelf_processor: Addr<T>,
 }
-impl <T>UdpActor<T>
-    where
-        T: Actor + Handler<GelfProcessorMessage>,
-        T::Context: ToEnvelope<T, GelfProcessorMessage>
+impl<T> UdpActor<T>
+where
+    T: Actor + Handler<GelfProcessorMessage>,
+    T::Context: ToEnvelope<T, GelfProcessorMessage>,
 {
     pub fn new(
         recv: RecvHalf,
@@ -51,10 +50,8 @@ impl <T>UdpActor<T>
         max_parallel_chunks: usize,
     ) -> Addr<UdpActor<T>> {
         UdpActor::create(|ctx| {
-            ctx.add_stream(read_many(recv).map(|(buf, addr)| {
-                UdpPacket(buf, addr)
-            }));
-            UdpActor{
+            ctx.add_stream(read_many(recv).map(|(buf, addr)| UdpPacket(buf, addr)));
+            UdpActor {
                 unpacker,
                 reader,
                 gelf_processor,
@@ -63,10 +60,10 @@ impl <T>UdpActor<T>
         })
     }
 }
-impl <T>Actor for UdpActor<T>
-    where
-        T: Actor + Handler<GelfProcessorMessage>,
-        T::Context: ToEnvelope<T, GelfProcessorMessage>
+impl<T> Actor for UdpActor<T>
+where
+    T: Actor + Handler<GelfProcessorMessage>,
+    T::Context: ToEnvelope<T, GelfProcessorMessage>,
 {
     type Context = Context<Self>;
 }
@@ -76,109 +73,103 @@ impl Message for UdpPacket {
     type Result = Vec<u8>;
 }
 
-impl <T: 'static>StreamHandler<UdpPacket> for UdpActor<T>
-    where
-        T: Actor + Handler<GelfProcessorMessage>,
-        T::Context: ToEnvelope<T, GelfProcessorMessage>
+impl<T: 'static> StreamHandler<UdpPacket> for UdpActor<T>
+where
+    T: Actor + Handler<GelfProcessorMessage>,
+    T::Context: ToEnvelope<T, GelfProcessorMessage>,
 {
-    fn handle(&mut self, msg: UdpPacket, ctx: &mut Context<Self>) {
-        let buf = msg.0;
-
+    fn handle(&mut self, UdpPacket(buf, _addr): UdpPacket, ctx: &mut Context<Self>) {
         let reader_actor = self.reader.clone();
         let processor_actor = self.gelf_processor.clone();
         let unpacker_actor = self.unpacker.clone();
         let unchanker_actor = self.unchanker.clone();
 
-        ctx.spawn(async move {
-            let chunked_buf_message = UnpackMessage{
-                0: buf
-            };
-            let unchanked_requested_buf = unchanker_actor.send(chunked_buf_message);
-            let unchanked_result_buf = match unchanked_requested_buf.await {
-                Ok(pd) => pd,
-                Err(e) => {
-                    eprintln!("unchunker actor mailing error: {}", e);
-                    return
-                }
-            };
-            let unchanked_buf = match unchanked_result_buf {
-                Ok(pd) => pd,
-                Err(e) => {
-                    if e.kind() != std::io::ErrorKind::WriteZero {
-                        eprintln!("udp unchunking data error: {}", e);
+        ctx.spawn(
+            async move {
+                let chunked_buf_message = UnpackMessage(buf);
+                let unchanked_requested_buf = unchanker_actor.send(chunked_buf_message);
+                let unchanked_result_buf = match unchanked_requested_buf.await {
+                    Ok(pd) => pd,
+                    Err(e) => {
+                        eprintln!("unchunker actor mailing error: {}", e);
+                        return;
                     }
-                    return
-                }
-            };
-
-            let packed_buf_message = UnpackMessage{
-                0: unchanked_buf
-            };
-            let unpacked_requested_buf = unpacker_actor.send(packed_buf_message);
-            let unpacked_result_buf = match unpacked_requested_buf.await {
-                Ok(pd) => pd,
-                Err(e) => {
-                    eprintln!("unpacker actor mailing error: {}", e);
-                    return
-                }
-            };
-            let parsed_data = match unpacked_result_buf {
-                Ok(pd) => pd,
-                Err(e) => {
-                    eprintln!("udp parsing data error: {}", e);
-                    return
-                }
-            };
-
-            let gelf_msg = GelfMessage{
-                0: parsed_data.clone()
-            };
-
-            let reader = match reader_actor.send(gelf_msg).await {
-                Ok(ug) => ug,
-                Err(e) => {
-                    eprintln!("gelf actor mailing error: {}", e);
-                    return
-                }
-            };
-
-            match reader {
-                Ok(reader) => {
-                    let printer_message = GelfProcessorMessage {
-                        0: reader
-                    };
-                    match processor_actor.send(printer_message).await {
-                        Ok(ug) => ug,
-                        Err(e) => {
-                            eprintln!("gelf actor processing error: {}", e);
-                            return;
+                };
+                let unchanked_buf = match unchanked_result_buf {
+                    Ok(pd) => pd,
+                    Err(e) => {
+                        if e.kind() != std::io::ErrorKind::WriteZero {
+                            eprintln!("udp unchunking data error: {}", e);
                         }
-                    };
-                }
-                Err(e) => {
-                    match std::str::from_utf8(&parsed_data) {
-                        Ok(s) => eprintln!("udp parsing gelf error: {}\nOriginal response: {:?}", e, s),
-                        Err(_e) => eprintln!("udp parsing gelf error: {}\nOriginal response: {:?}", e, &parsed_data),
+                        return;
                     }
-                }
-            };
-        }.into_actor(self));
+                };
+
+                let packed_buf_message = UnpackMessage(unchanked_buf);
+                let unpacked_requested_buf = unpacker_actor.send(packed_buf_message);
+                let unpacked_result_buf = match unpacked_requested_buf.await {
+                    Ok(pd) => pd,
+                    Err(e) => {
+                        eprintln!("unpacker actor mailing error: {}", e);
+                        return;
+                    }
+                };
+                let parsed_data = match unpacked_result_buf {
+                    Ok(pd) => pd,
+                    Err(e) => {
+                        eprintln!("udp parsing data error: {}", e);
+                        return;
+                    }
+                };
+
+                let gelf_msg = GelfMessage(parsed_data.clone());
+
+                let reader = match reader_actor.send(gelf_msg).await {
+                    Ok(ug) => ug,
+                    Err(e) => {
+                        eprintln!("gelf actor mailing error: {}", e);
+                        return;
+                    }
+                };
+
+                match reader {
+                    Ok(reader) => {
+                        let printer_message = GelfProcessorMessage(reader);
+                        match processor_actor.send(printer_message).await {
+                            Ok(ug) => ug,
+                            Err(e) => {
+                                eprintln!("gelf actor processing error: {}", e);
+                                return;
+                            }
+                        };
+                    }
+                    Err(e) => match std::str::from_utf8(&parsed_data) {
+                        Ok(s) => {
+                            eprintln!("udp parsing gelf error: {}\nOriginal response: {:?}", e, s)
+                        }
+                        Err(_e) => eprintln!(
+                            "udp parsing gelf error: {}\nOriginal response: {:?}",
+                            e, &parsed_data
+                        ),
+                    },
+                };
+            }
+            .into_actor(self),
+        );
     }
 }
 
 type RecvData = (Vec<u8>, SocketAddr);
 
 fn read_many(recv: RecvHalf) -> impl Stream<Item = RecvData> {
-    stream::unfold(recv, |mut recv| {
-        async {
-            let mut buf = vec![0; 8196];
-            let (n, addr) = match recv.recv_from(&mut buf).await {
-                Ok((n, addr)) => (n, addr),
-                Err(_e) => return None
-            };
-            buf.truncate(n);
-            Some(((buf, addr), recv))
-        }
+    stream::unfold(recv, |mut recv| async {
+        let mut buf = vec![0; 8196];
+        let (n, addr) = match recv.recv_from(&mut buf).await {
+            Ok((n, addr)) => (n, addr),
+            Err(_e) => return None,
+        };
+        buf.truncate(n);
+        Some(((buf, addr), recv))
     })
 }
 
@@ -215,7 +206,7 @@ impl Handler<UnpackMessage> for ChunkAcceptor {
                     let sequence_count = chunk.sequence_count.clone();
                     chunks.push(chunk);
                     if sequence_count == chunks.len() as u8 {
-                        chunks.sort_by(|a,b| {
+                        chunks.sort_by(|a, b| {
                             a.sequence_number.partial_cmp(&b.sequence_number).unwrap()
                         });
 
@@ -233,7 +224,7 @@ impl Handler<UnpackMessage> for ChunkAcceptor {
                 }
             }
 
-            return Err(std::io::Error::from(std::io::ErrorKind::WriteZero))
+            return Err(std::io::Error::from(std::io::ErrorKind::WriteZero));
         } else {
             parsed_buf = Vec::from(buf)
         }
@@ -245,7 +236,7 @@ struct MessageChunk {
     message_id: String,
     sequence_number: u8,
     sequence_count: u8,
-    message_chunk: Vec<u8>
+    message_chunk: Vec<u8>,
 }
 
 impl MessageChunk {
@@ -261,10 +252,10 @@ impl MessageChunk {
 
 fn is_chunk(buf: &[u8]) -> bool {
     if buf.len() <= 2 {
-        return false
+        return false;
     }
     if !(buf[0] == 30 && buf[1] == 15) {
-        return false
+        return false;
     }
-    return true
+    return true;
 }

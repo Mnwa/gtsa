@@ -1,7 +1,7 @@
 use actix::prelude::*;
-use serde_json::{Map, Value, Result as JsonResult};
-use serde::{Deserialize, Serialize};
 use serde::de::Error;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Result as JsonResult, Value};
 
 pub struct GelfReader {
     data: GelfData,
@@ -13,12 +13,14 @@ impl GelfReader {
 
         let data = match to_gelf(data) {
             Some(data) => data,
-            None => return Err(serde_json::Error::missing_field("one of the gelf data struct"))
+            None => {
+                return Err(serde_json::Error::missing_field(
+                    "one of the gelf data struct",
+                ))
+            }
         };
 
-        Ok(GelfReader {
-            data
-        })
+        Ok(GelfReader { data })
     }
 
     pub fn print(&self) {
@@ -57,8 +59,8 @@ impl Actor for GelfReaderActor {
 impl Handler<GelfMessage> for GelfReaderActor {
     type Result = JsonResult<GelfReader>;
 
-    fn handle(&mut self, msg: GelfMessage, _ctx: &mut Self::Context) -> Self::Result {
-        GelfReader::from_slice(msg.0.as_slice())
+    fn handle(&mut self, GelfMessage(msg): GelfMessage, _ctx: &mut Self::Context) -> Self::Result {
+        GelfReader::from_slice(msg.as_slice())
     }
 }
 
@@ -83,22 +85,14 @@ fn to_gelf(data: Map<String, Value>) -> Option<GelfData> {
         "timestamp".to_owned(),
         "version".to_owned(),
     ];
-    data
-        .iter()
-        .for_each(|(k, v)| {
-            let str_k = k.as_str();
-            if &str_k[..1] == "_" {
-                meta.insert(
-                    str_k[1..].to_owned(),
-                    v.to_owned()
-                );
-            } else if !gelf_fields.contains(k) {
-                mechanism_data.insert(
-                    str_k.to_owned(),
-                    v.to_owned(),
-                );
-            }
-        });
+    data.iter().for_each(|(k, v)| {
+        let str_k = k.as_str();
+        if &str_k[..1] == "_" {
+            meta.insert(str_k[1..].to_owned(), v.to_owned());
+        } else if !gelf_fields.contains(k) {
+            mechanism_data.insert(str_k.to_owned(), v.to_owned());
+        }
+    });
 
     Some(GelfData {
         host: data.get("host")?.to_string(),

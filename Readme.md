@@ -1,4 +1,8 @@
 # GTSA project
+[![](https://docs.rs/gtsa/badge.svg)](https://docs.rs/gtsa/)
+![Rust](https://github.com/Mnwa/gtsa/workflows/Build/badge.svg?branch=master)
+[![](https://img.shields.io/crates/v/gtsa.svg)](https://crates.io/crates/gtsa)
+[![](https://img.shields.io/crates/d/gtsa.svg)](https://crates.io/crates/gtsa)
 
 Gelf To Sentry Adapter is the simple solution to proxy gelf messages (messages for [Graylog](https://www.graylog.org/)) to [Sentry](https://sentry.io/)
 

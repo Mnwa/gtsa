@@ -14,12 +14,12 @@ These instructions will get you a copy of the project up and running on your loc
 
 You need to docker or cargo with rust
 
-### Installing
+### Installing and running
 
-You can install it with cargo 
+You can install and run it with cargo 
 
 ```bash
-cargo install --path .
+cargo install gtsa
 gtsa
 ```
 

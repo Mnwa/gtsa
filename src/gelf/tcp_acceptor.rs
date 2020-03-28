@@ -1,3 +1,4 @@
+use crate::gelf::error::GelfError;
 use crate::gelf::gelf_message_processor::GelfProcessorMessage;
 use crate::gelf::gelf_reader::{GelfMessage, GelfReaderActor};
 use actix::dev::ToEnvelope;
@@ -39,7 +40,7 @@ where
         reader: Addr<GelfReaderActor>,
     ) -> Addr<TcpActor<T>> {
         TcpActor::create(|ctx| {
-            ctx.add_stream(read_many(listener).map(|socket| TcpPacket(socket)));
+            ctx.add_stream(read_many(listener).map(TcpPacket));
             TcpActor {
                 reader,
                 gelf_processor,
@@ -75,55 +76,53 @@ where
             async move {
                 let mut buf = Vec::new();
                 loop {
-                    match socket.read_to_end(&mut buf).await {
-                        // socket closed
-                        Ok(n) if n == 0 => return,
-                        Ok(n) => n,
+                    let gelf_message = socket
+                        .read_to_end(&mut buf)
+                        .await
+                        .map_err(|e| GelfError::from_err("failed to read from socket:", e))
+                        .and_then(|n| match n {
+                            0 => Err(GelfError::new("socket closed")),
+                            _ => Ok(n),
+                        })
+                        .map(|n| {
+                            buf.truncate(n - 1);
+                            GelfMessage(buf.clone())
+                        });
+
+                    let gelf_message = match gelf_message {
+                        Ok(m) => m,
                         Err(e) => {
-                            eprintln!("failed to read from socket; err = {:?}", e);
+                            eprintln!("{}", e);
                             return;
                         }
                     };
 
-                    let buf_last_i = buf.len() - 1;
-                    if buf[buf_last_i] == 0 {
-                        buf.truncate(buf_last_i);
+                    let reader = reader_actor
+                        .send(gelf_message)
+                        .await
+                        .map_err(|e| GelfError::from_err("gelf actor mailing error:", e))
+                        .and_then(|reader| {
+                            reader.map_err(|e| {
+                                println!("Original response: {}", String::from_utf8_lossy(&buf));
+                                GelfError::from_err("tcp parsing gelf error:", e)
+                            })
+                        })
+                        .map(GelfProcessorMessage);
 
-                        let gelf_msg = GelfMessage(buf.clone());
+                    let gelf_processor_message = match reader {
+                        Ok(r) => r,
+                        Err(e) => {
+                            eprintln!("{}", e);
+                            return;
+                        }
+                    };
 
-                        let reader = match reader_actor.send(gelf_msg).await {
-                            Ok(ug) => ug,
-                            Err(e) => {
-                                eprintln!("gelf actor mailing error: {}", e);
-                                return;
-                            }
-                        };
-
-                        match reader {
-                            Ok(reader) => {
-                                let printer_message = GelfProcessorMessage(reader);
-                                match processor_actor.send(printer_message).await {
-                                    Ok(ug) => ug,
-                                    Err(e) => {
-                                        eprintln!("gelf actor processing error: {}", e);
-                                        return;
-                                    }
-                                };
-                            }
-                            Err(e) => match std::str::from_utf8(&buf) {
-                                Ok(s) => eprintln!(
-                                    "tcp parsing gelf error: {}\nOriginal response: {:?}",
-                                    e, s
-                                ),
-                                Err(_e) => eprintln!(
-                                    "tcp parsing gelf error: {}\nOriginal response: {:?}",
-                                    e, &buf
-                                ),
-                            },
-                        };
-
-                        buf.clear()
+                    if let Err(e) = processor_actor.send(gelf_processor_message).await {
+                        eprintln!("{}", GelfError::from_err("gelf actor processing error:", e));
+                        return;
                     }
+
+                    buf.clear()
                 }
             }
             .into_actor(self),

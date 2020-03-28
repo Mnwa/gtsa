@@ -1,3 +1,4 @@
+pub mod error;
 pub mod gelf_message_processor;
 pub mod gelf_reader;
 pub mod tcp_acceptor;

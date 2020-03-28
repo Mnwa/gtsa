@@ -90,18 +90,21 @@ where
         ctx.spawn(
             async move {
                 let packed_buf_message = unchanker_actor
-                    .send(UnpackMessage(buf))
+                    .send(UnchankMessage(buf))
                     .await
-                    .map_err(|e| GelfError::from_err("unchunker actor mailing error", e))
-                    .and_then(|bu| {
-                        bu.map_err(|e| GelfError::from_err("udp unchunking data error", e))
-                    })
-                    .map(UnpackMessage);
+                    .map_err(|e| GelfError::from_err("unchunker actor mailing error", e));
 
                 let packed_buf_message = match packed_buf_message {
                     Ok(p) => p,
                     Err(e) => {
                         eprintln!("{}", e);
+                        return;
+                    }
+                };
+
+                let packed_buf_message = match packed_buf_message {
+                    Some(p) => UnpackMessage(p),
+                    None => {
                         return;
                     }
                 };
@@ -169,6 +172,12 @@ fn read_udp(recv: RecvHalf) -> impl Stream<Item = UdpPacket> {
     .map(|(buf, addr)| UdpPacket(buf, addr))
 }
 
+pub struct UnchankMessage(pub Vec<u8>);
+
+impl Message for UnchankMessage {
+    type Result = Option<Vec<u8>>;
+}
+
 struct ChunkAcceptor {
     chunked_messages: LruCache<String, BinaryHeap<MessageChunk>>,
 }
@@ -185,12 +194,14 @@ impl Actor for ChunkAcceptor {
     type Context = Context<Self>;
 }
 
-impl Handler<UnpackMessage> for ChunkAcceptor {
-    type Result = std::io::Result<Vec<u8>>;
+impl Handler<UnchankMessage> for ChunkAcceptor {
+    type Result = Option<Vec<u8>>;
 
-    fn handle(&mut self, msg: UnpackMessage, _ctx: &mut Self::Context) -> Self::Result {
-        let UnpackMessage(buf) = msg;
-
+    fn handle(
+        &mut self,
+        UnchankMessage(buf): UnchankMessage,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
         if is_chunk(&buf) {
             let chunk = MessageChunk::new(buf);
 
@@ -210,7 +221,7 @@ impl Handler<UnpackMessage> for ChunkAcceptor {
 
                         self.chunked_messages.pop(&message_id);
 
-                        return Ok(parsed_buf);
+                        return Some(parsed_buf);
                     }
                 }
                 None => {
@@ -223,9 +234,9 @@ impl Handler<UnpackMessage> for ChunkAcceptor {
                 }
             }
 
-            Err(std::io::Error::from(std::io::ErrorKind::WriteZero))
+            None
         } else {
-            Ok(buf)
+            Some(buf)
         }
     }
 }

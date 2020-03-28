@@ -79,7 +79,7 @@ where
                     let gelf_message = socket
                         .read_to_end(&mut buf)
                         .await
-                        .map_err(|e| GelfError::from_err("failed to read from socket:", e))
+                        .map_err(|e| GelfError::from_err("failed to read from socket", e))
                         .and_then(|n| match n {
                             0 => Err(GelfError::new("socket closed")),
                             _ => Ok(n),
@@ -100,11 +100,11 @@ where
                     let reader = reader_actor
                         .send(gelf_message)
                         .await
-                        .map_err(|e| GelfError::from_err("gelf actor mailing error:", e))
+                        .map_err(|e| GelfError::from_err("gelf actor mailing error", e))
                         .and_then(|reader| {
                             reader.map_err(|e| {
                                 println!("Original response: {}", String::from_utf8_lossy(&buf));
-                                GelfError::from_err("tcp parsing gelf error:", e)
+                                GelfError::from_err("tcp parsing gelf error", e)
                             })
                         })
                         .map(GelfProcessorMessage);
@@ -118,7 +118,7 @@ where
                     };
 
                     if let Err(e) = processor_actor.send(gelf_processor_message).await {
-                        eprintln!("{}", GelfError::from_err("gelf actor processing error:", e));
+                        eprintln!("{}", GelfError::from_err("gelf actor processing error", e));
                         return;
                     }
 

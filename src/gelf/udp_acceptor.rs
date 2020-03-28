@@ -92,9 +92,9 @@ where
                 let packed_buf_message = unchanker_actor
                     .send(UnpackMessage(buf))
                     .await
-                    .map_err(|e| GelfError::from_err("unchunker actor mailing error:", e))
+                    .map_err(|e| GelfError::from_err("unchunker actor mailing error", e))
                     .and_then(|bu| {
-                        bu.map_err(|e| GelfError::from_err("udp unchunking data error:", e))
+                        bu.map_err(|e| GelfError::from_err("udp unchunking data error", e))
                     })
                     .map(UnpackMessage);
 
@@ -109,10 +109,8 @@ where
                 let gelf_msg = unpacker_actor
                     .send(packed_buf_message)
                     .await
-                    .map_err(|e| GelfError::from_err("unpacker actor mailing error:", e))
-                    .and_then(|bm| {
-                        bm.map_err(|e| GelfError::from_err("udp parsing data error:", e))
-                    })
+                    .map_err(|e| GelfError::from_err("unpacker actor mailing error", e))
+                    .and_then(|bm| bm.map_err(|e| GelfError::from_err("udp parsing data error", e)))
                     .map(GelfMessage);
 
                 let gelf_msg = match gelf_msg {
@@ -128,14 +126,14 @@ where
                 let gelf_msg = reader_actor
                     .send(gelf_msg)
                     .await
-                    .map_err(|e| GelfError::from_err("gelf actor mailing error:", e))
+                    .map_err(|e| GelfError::from_err("gelf actor mailing error", e))
                     .and_then(|reader| {
                         reader.map_err(|e| {
                             println!(
                                 "Original response: {}",
                                 String::from_utf8_lossy(&original_message)
                             );
-                            GelfError::from_err("udp parsing gelf error:", e)
+                            GelfError::from_err("udp parsing gelf error", e)
                         })
                     })
                     .map(GelfProcessorMessage);

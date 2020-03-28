@@ -10,6 +10,8 @@ use tokio::net::{ToSocketAddrs, UdpSocket};
 
 extern crate lru;
 use lru::LruCache;
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 
 pub async fn new_udp_acceptor<T, A>(
     bind_addr: T,
@@ -174,7 +176,7 @@ fn read_many(recv: RecvHalf) -> impl Stream<Item = RecvData> {
 }
 
 struct ChunkAcceptor {
-    chunked_messages: LruCache<String, Vec<MessageChunk>>,
+    chunked_messages: LruCache<String, BinaryHeap<MessageChunk>>,
 }
 
 impl ChunkAcceptor {
@@ -193,10 +195,9 @@ impl Handler<UnpackMessage> for ChunkAcceptor {
     type Result = std::io::Result<Vec<u8>>;
 
     fn handle(&mut self, msg: UnpackMessage, _ctx: &mut Self::Context) -> Self::Result {
-        let buf = msg.0.as_slice();
-        let mut parsed_buf = Vec::new();
+        let UnpackMessage(buf) = msg;
 
-        if is_chunk(buf) {
+        if is_chunk(&buf) {
             let chunk = MessageChunk::new(buf);
 
             let message_id = chunk.message_id.clone();
@@ -206,13 +207,12 @@ impl Handler<UnpackMessage> for ChunkAcceptor {
                     let sequence_count = chunk.sequence_count.clone();
                     chunks.push(chunk);
                     if sequence_count == chunks.len() as u8 {
-                        chunks.sort_by(|a, b| {
-                            a.sequence_number.partial_cmp(&b.sequence_number).unwrap()
-                        });
-
-                        for chunk in chunks {
-                            parsed_buf.append(&mut chunk.message_chunk);
-                        }
+                        let parsed_buf = chunks
+                            .clone()
+                            .into_sorted_vec()
+                            .into_iter()
+                            .flat_map(|chunk| chunk.message_chunk.into_iter())
+                            .collect();
 
                         self.chunked_messages.pop(&message_id);
 
@@ -220,18 +220,23 @@ impl Handler<UnpackMessage> for ChunkAcceptor {
                     }
                 }
                 None => {
-                    self.chunked_messages.put(message_id, vec![chunk]);
+                    let b_h = {
+                        let mut temp = BinaryHeap::with_capacity(1);
+                        temp.push(chunk);
+                        temp
+                    };
+                    self.chunked_messages.put(message_id, b_h);
                 }
             }
 
-            return Err(std::io::Error::from(std::io::ErrorKind::WriteZero));
+            Err(std::io::Error::from(std::io::ErrorKind::WriteZero))
         } else {
-            parsed_buf = Vec::from(buf)
+            Ok(buf)
         }
-        Ok(parsed_buf)
     }
 }
 
+#[derive(Clone)]
 struct MessageChunk {
     message_id: String,
     sequence_number: u8,
@@ -240,13 +245,31 @@ struct MessageChunk {
 }
 
 impl MessageChunk {
-    fn new(buf: &[u8]) -> MessageChunk {
+    fn new(buf: Vec<u8>) -> MessageChunk {
         MessageChunk {
             message_id: std::string::String::from_utf8_lossy(&buf[2..9]).to_string(),
             sequence_number: buf[10],
             sequence_count: buf[11],
-            message_chunk: Vec::from(&buf[12..]),
+            message_chunk: buf[12..].to_vec(),
         }
+    }
+}
+
+impl PartialEq for MessageChunk {
+    fn eq(&self, other: &Self) -> bool {
+        self.sequence_number.eq(&other.sequence_number)
+    }
+}
+impl PartialOrd for MessageChunk {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.sequence_number.partial_cmp(&other.sequence_number)
+    }
+}
+
+impl Eq for MessageChunk {}
+impl Ord for MessageChunk {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.sequence_number.cmp(&other.sequence_number)
     }
 }
 

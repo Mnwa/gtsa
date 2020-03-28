@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 
 use crate::gelf::gelf_message_processor::GelfProcessorMessage;
 use reqwest::Client;
-use std::borrow::Borrow;
+use std::borrow::Cow;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct SentryProcessorActor {
@@ -13,10 +13,20 @@ pub struct SentryProcessorActor {
     prepare_actor: Addr<PrepareActor>,
 }
 
-impl SentryProcessorActor {
-    pub fn new(secret_link: &str, prepare_json_threads: usize) -> Addr<SentryProcessorActor> {
-        let (protocol, pub_key, host, project) =
-            scan_fmt!(secret_link, "{}://{}@{}/{}", String, String, String, i32).unwrap();
+impl<'a> SentryProcessorActor {
+    pub fn new<T>(secret_link: T, prepare_json_threads: usize) -> Addr<SentryProcessorActor>
+    where
+        T: Into<Cow<'a, str>>,
+    {
+        let (protocol, pub_key, host, project) = scan_fmt!(
+            &secret_link.into(),
+            "{}://{}@{}/{}",
+            String,
+            String,
+            String,
+            i32
+        )
+        .unwrap();
 
         SentryProcessorActor::create(|_| SentryProcessorActor {
             dsn: Dsn {
@@ -59,7 +69,7 @@ impl Handler<GelfProcessorMessage> for SentryProcessorActor {
                     Some(r) => r,
                     None => return,
                 };
-                match rb.json(request.borrow()).send().await {
+                match rb.json(&request).send().await {
                     Ok(r) => {
                         println!("sentry response: {}", r.text().await.unwrap());
                         return;

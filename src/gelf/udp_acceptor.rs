@@ -160,10 +160,10 @@ where
 
 fn read_udp(recv: RecvHalf) -> impl Stream<Item = UdpPacket> {
     stream::unfold(recv, |mut recv| async {
-        let mut buf = Vec::with_capacity(8196);
+        let mut buf = vec![0; 8196];
         let (n, addr) = match recv.recv_from(&mut buf).await {
             Ok((n, addr)) => (n, addr),
-            Err(_e) => return None,
+            Err(e) => panic!("udp handling panic: {:?}", e),
         };
         buf.truncate(n);
         Some(((buf, addr), recv))

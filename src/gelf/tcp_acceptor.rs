@@ -134,7 +134,7 @@ fn read_tcp(listener: TcpListener) -> impl Stream<Item = TcpPacket> {
     stream::unfold(listener, |mut listener| async {
         match listener.accept().await {
             Ok((socket, _)) => Some((socket, listener)),
-            Err(_e) => None,
+            Err(e) => panic!("tcp handling panic: {:?}", e),
         }
     })
     .map(TcpPacket)

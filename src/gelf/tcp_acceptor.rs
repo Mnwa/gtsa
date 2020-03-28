@@ -40,7 +40,7 @@ where
         reader: Addr<GelfReaderActor>,
     ) -> Addr<TcpActor<T>> {
         TcpActor::create(|ctx| {
-            ctx.add_stream(read_many(listener).map(TcpPacket));
+            ctx.add_stream(read_tcp(listener));
             TcpActor {
                 reader,
                 gelf_processor,
@@ -130,11 +130,12 @@ where
     }
 }
 
-fn read_many(listener: TcpListener) -> impl Stream<Item = TcpStream> {
+fn read_tcp(listener: TcpListener) -> impl Stream<Item = TcpPacket> {
     stream::unfold(listener, |mut listener| async {
         match listener.accept().await {
             Ok((socket, _)) => Some((socket, listener)),
             Err(_e) => None,
         }
     })
+    .map(TcpPacket)
 }

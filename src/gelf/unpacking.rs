@@ -1,12 +1,11 @@
 use actix::prelude::*;
 use flate2::read::{GzDecoder, ZlibDecoder};
-use std::io;
-use std::io::prelude::*;
+use std::io::Read;
 
 pub struct UnpackMessage(pub Vec<u8>);
 
 impl Message for UnpackMessage {
-    type Result = Result<Vec<u8>, io::Error>;
+    type Result = std::io::Result<Vec<u8>>;
 }
 
 pub struct UnPackActor;
@@ -54,7 +53,7 @@ fn is_gz(buf: &[u8]) -> bool {
     if !(buf[0] == 31 && buf[1] == 139) {
         return false;
     }
-    return true;
+    true
 }
 fn is_zlib(buf: &[u8]) -> bool {
     let compression_level_bytes = [1, 94, 156, 218];
@@ -67,5 +66,5 @@ fn is_zlib(buf: &[u8]) -> bool {
     if !compression_level_bytes.contains(&buf[1]) {
         return false;
     }
-    return true;
+    true
 }

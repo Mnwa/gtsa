@@ -9,6 +9,7 @@ use tokio::net::udp::RecvHalf;
 use tokio::net::{ToSocketAddrs, UdpSocket};
 
 extern crate lru;
+use crate::gelf::error::GelfError;
 use lru::LruCache;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
@@ -88,73 +89,70 @@ where
 
         ctx.spawn(
             async move {
-                let chunked_buf_message = UnpackMessage(buf);
-                let unchanked_requested_buf = unchanker_actor.send(chunked_buf_message);
-                let unchanked_result_buf = match unchanked_requested_buf.await {
-                    Ok(pd) => pd,
+                let packed_buf_message = unchanker_actor
+                    .send(UnpackMessage(buf))
+                    .await
+                    .map_err(|e| GelfError::from_err("unchunker actor mailing error:", e))
+                    .and_then(|unchanked_buf| {
+                        unchanked_buf
+                            .map_err(|e| GelfError::from_err("udp unchunking data error:", e))
+                    })
+                    .map(UnpackMessage);
+
+                let packed_buf_message = match packed_buf_message {
+                    Ok(p) => p,
                     Err(e) => {
-                        eprintln!("unchunker actor mailing error: {}", e);
-                        return;
-                    }
-                };
-                let unchanked_buf = match unchanked_result_buf {
-                    Ok(pd) => pd,
-                    Err(e) => {
-                        if e.kind() != std::io::ErrorKind::WriteZero {
-                            eprintln!("udp unchunking data error: {}", e);
-                        }
+                        eprintln!("{}", e);
                         return;
                     }
                 };
 
-                let packed_buf_message = UnpackMessage(unchanked_buf);
-                let unpacked_requested_buf = unpacker_actor.send(packed_buf_message);
-                let unpacked_result_buf = match unpacked_requested_buf.await {
-                    Ok(pd) => pd,
-                    Err(e) => {
-                        eprintln!("unpacker actor mailing error: {}", e);
-                        return;
-                    }
-                };
-                let parsed_data = match unpacked_result_buf {
-                    Ok(pd) => pd,
-                    Err(e) => {
-                        eprintln!("udp parsing data error: {}", e);
-                        return;
-                    }
-                };
+                let gelf_msg = unpacker_actor
+                    .send(packed_buf_message)
+                    .await
+                    .map_err(|e| GelfError::from_err("unpacker actor mailing error:", e))
+                    .and_then(|unchanked_buf| {
+                        unchanked_buf.map_err(|e| GelfError::from_err("udp parsing data error:", e))
+                    })
+                    .map(GelfMessage);
 
-                let gelf_msg = GelfMessage(parsed_data.clone());
-
-                let reader = match reader_actor.send(gelf_msg).await {
-                    Ok(ug) => ug,
+                let gelf_msg = match gelf_msg {
+                    Ok(g) => g,
                     Err(e) => {
-                        eprintln!("gelf actor mailing error: {}", e);
+                        eprintln!("{}", e);
                         return;
                     }
                 };
 
-                match reader {
-                    Ok(reader) => {
-                        let printer_message = GelfProcessorMessage(reader);
-                        match processor_actor.send(printer_message).await {
-                            Ok(ug) => ug,
-                            Err(e) => {
-                                eprintln!("gelf actor processing error: {}", e);
-                                return;
-                            }
-                        };
+                let original_message = gelf_msg.0.clone();
+
+                let gelf_msg = reader_actor
+                    .send(gelf_msg)
+                    .await
+                    .map_err(|e| GelfError::from_err("gelf actor mailing error:", e))
+                    .and_then(|reader| {
+                        reader.map_err(|e| {
+                            println!(
+                                "Original response: {}",
+                                String::from_utf8_lossy(&original_message)
+                            );
+                            GelfError::from_err("udp parsing gelf error:", e)
+                        })
+                    })
+                    .map(GelfProcessorMessage);
+
+                let gelf_msg = match gelf_msg {
+                    Ok(g) => g,
+                    Err(e) => {
+                        eprintln!("{}", e);
+                        return;
                     }
-                    Err(e) => match std::str::from_utf8(&parsed_data) {
-                        Ok(s) => {
-                            eprintln!("udp parsing gelf error: {}\nOriginal response: {:?}", e, s)
-                        }
-                        Err(_e) => eprintln!(
-                            "udp parsing gelf error: {}\nOriginal response: {:?}",
-                            e, &parsed_data
-                        ),
-                    },
                 };
+
+                if let Err(e) = processor_actor.send(gelf_msg).await {
+                    eprintln!("gelf actor processing error: {}", e);
+                    return;
+                }
             }
             .into_actor(self),
         );
@@ -204,7 +202,7 @@ impl Handler<UnpackMessage> for ChunkAcceptor {
 
             match self.chunked_messages.get_mut(&message_id) {
                 Some(chunks) => {
-                    let sequence_count = chunk.sequence_count.clone();
+                    let sequence_count = chunk.sequence_count;
                     chunks.push(chunk);
                     if sequence_count == chunks.len() as u8 {
                         let parsed_buf = chunks
@@ -280,5 +278,5 @@ fn is_chunk(buf: &[u8]) -> bool {
     if !(buf[0] == 30 && buf[1] == 15) {
         return false;
     }
-    return true;
+    true
 }

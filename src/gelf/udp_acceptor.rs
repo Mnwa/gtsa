@@ -92,18 +92,17 @@ where
                 let packed_buf_message = unchanker_actor
                     .send(UnchankMessage(buf))
                     .await
-                    .map_err(|e| GelfError::from_err("unchunker actor mailing error", e));
-
-                let packed_buf_message = match packed_buf_message {
-                    Ok(p) => p,
-                    Err(e) => {
+                    .map_err(|e| GelfError::from_err("unchunker actor mailing error", e))
+                    .map_err(|e| {
                         eprintln!("{}", e);
-                        return;
-                    }
-                };
+                        e
+                    })
+                    .ok()
+                    .and_then(|p| p)
+                    .map(UnpackMessage);
 
                 let packed_buf_message = match packed_buf_message {
-                    Some(p) => UnpackMessage(p),
+                    Some(p) => p,
                     None => {
                         return;
                     }

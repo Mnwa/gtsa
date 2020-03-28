@@ -53,7 +53,7 @@ where
         max_parallel_chunks: usize,
     ) -> Addr<UdpActor<T>> {
         UdpActor::create(|ctx| {
-            ctx.add_stream(read_many(recv).map(|(buf, addr)| UdpPacket(buf, addr)));
+            ctx.add_stream(read_udp(recv));
             UdpActor {
                 unpacker,
                 reader,
@@ -93,9 +93,8 @@ where
                     .send(UnpackMessage(buf))
                     .await
                     .map_err(|e| GelfError::from_err("unchunker actor mailing error:", e))
-                    .and_then(|unchanked_buf| {
-                        unchanked_buf
-                            .map_err(|e| GelfError::from_err("udp unchunking data error:", e))
+                    .and_then(|bu| {
+                        bu.map_err(|e| GelfError::from_err("udp unchunking data error:", e))
                     })
                     .map(UnpackMessage);
 
@@ -111,8 +110,8 @@ where
                     .send(packed_buf_message)
                     .await
                     .map_err(|e| GelfError::from_err("unpacker actor mailing error:", e))
-                    .and_then(|unchanked_buf| {
-                        unchanked_buf.map_err(|e| GelfError::from_err("udp parsing data error:", e))
+                    .and_then(|bm| {
+                        bm.map_err(|e| GelfError::from_err("udp parsing data error:", e))
                     })
                     .map(GelfMessage);
 
@@ -159,11 +158,9 @@ where
     }
 }
 
-type RecvData = (Vec<u8>, SocketAddr);
-
-fn read_many(recv: RecvHalf) -> impl Stream<Item = RecvData> {
+fn read_udp(recv: RecvHalf) -> impl Stream<Item = UdpPacket> {
     stream::unfold(recv, |mut recv| async {
-        let mut buf = vec![0; 8196];
+        let mut buf = Vec::with_capacity(8196);
         let (n, addr) = match recv.recv_from(&mut buf).await {
             Ok((n, addr)) => (n, addr),
             Err(_e) => return None,
@@ -171,6 +168,7 @@ fn read_many(recv: RecvHalf) -> impl Stream<Item = RecvData> {
         buf.truncate(n);
         Some(((buf, addr), recv))
     })
+    .map(|(buf, addr)| UdpPacket(buf, addr))
 }
 
 struct ChunkAcceptor {

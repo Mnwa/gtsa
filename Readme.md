@@ -51,7 +51,6 @@ Also GTSA have a some env variables with default values, but you can edit it:
 ```env
 UDP_ADDR=0.0.0.0:8080 //udp address
 TCP_ADDR=0.0.0.0:8081 // tcp address
-SYSTEM=Gelf Mover // name of your application
 READER_THREADS=1 // threads for decoding and encoding json messages (max parrallel messages processing)
 UNPACKER_THREADS=1 // threads for unpacking messages what received with gz or zlib algoritms (max parrallel messages unpacking)
 MAX_PARALLEL_CHUNKS=100000 // maximum chunked messages what GTSA can processing, old messages will be flush (udp only)

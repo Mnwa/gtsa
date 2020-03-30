@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::fmt::{Display, Formatter, Result};
 
+/// Gelf error struct, which used to e-prints when something wrong.
 #[derive(Debug)]
 pub struct GelfError {
     message: String,

@@ -1,11 +1,14 @@
 use actix::prelude::*;
 use scan_fmt::scan_fmt;
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 use crate::gelf::gelf_message_processor::GelfProcessorMessage;
+use crate::gelf::gelf_reader::{GelfData, GelfDataWrapper, GelfLevel};
 use reqwest::Client;
 use std::borrow::Cow;
 use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 pub struct SentryProcessorActor {
     dsn: Dsn,
@@ -46,7 +49,7 @@ impl Actor for SentryProcessorActor {
 }
 
 impl Handler<GelfProcessorMessage> for SentryProcessorActor {
-    type Result = Option<Value>;
+    type Result = Option<SentryEvent>;
 
     fn handle(&mut self, msg: GelfProcessorMessage, ctx: &mut Self::Context) -> Self::Result {
         let url = self.dsn.prepare_url();
@@ -58,17 +61,14 @@ impl Handler<GelfProcessorMessage> for SentryProcessorActor {
         ctx.spawn(
             async move {
                 let sended_request = prepare_actor.send(msg).await;
-                let request_wrapped = match sended_request {
+                let request = match sended_request {
                     Ok(r) => r,
                     Err(e) => {
                         eprintln!("mailing prepare request error: {:?}", e);
                         return;
                     }
                 };
-                let request = match request_wrapped {
-                    Some(r) => r,
-                    None => return,
-                };
+
                 match rb.json(&request).send().await {
                     Ok(r) => {
                         println!("sentry response: {}", r.text().await.unwrap());
@@ -120,52 +120,105 @@ impl Actor for PrepareActor {
 }
 
 impl Handler<GelfProcessorMessage> for PrepareActor {
-    type Result = Option<Value>;
+    type Result = Option<SentryEvent>;
 
     fn handle(
         &mut self,
         GelfProcessorMessage(msg): GelfProcessorMessage,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
-        let gelf_msg = msg.as_gelf();
-        let level = match gelf_msg.level {
-            0 => "fatal",
-            1 => "error",
-            2 => "error",
-            3 => "error",
-            4 => "warning",
-            5 => "warning",
-            6 => "info",
-            7 => "debug",
-            _ => {
-                eprintln!("unknown gelf level error: {}", gelf_msg.level);
-                return None;
-            }
+        Some(SentryEvent::from(msg))
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+enum SentryLevels {
+    Fatal,
+    Error,
+    Warning,
+    Info,
+    Debug,
+}
+
+impl From<GelfLevel> for SentryLevels {
+    fn from(level: GelfLevel) -> Self {
+        match level {
+            GelfLevel::Emergency => SentryLevels::Fatal,
+            GelfLevel::Alert => SentryLevels::Error,
+            GelfLevel::Critical => SentryLevels::Error,
+            GelfLevel::Error => SentryLevels::Error,
+            GelfLevel::Warning => SentryLevels::Warning,
+            GelfLevel::Notice => SentryLevels::Warning,
+            GelfLevel::Informational => SentryLevels::Info,
+            GelfLevel::Debug => SentryLevels::Debug,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct SentryExceptionValueMechanism {
+    r#type: String,
+    data: Map<String, Value>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SentryExceptionValue {
+    r#type: String,
+    value: Value,
+    mechanism: Option<SentryExceptionValueMechanism>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SentryException {
+    values: Vec<SentryExceptionValue>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SentryEvent {
+    event_id: Uuid,
+    server_name: String,
+    timestamp: f64,
+    level: SentryLevels,
+    exception: SentryException,
+}
+
+impl From<GelfDataWrapper> for SentryEvent {
+    fn from(gd: GelfDataWrapper) -> Self {
+        let GelfData {
+            host,
+            level,
+            short_message,
+            timestamp,
+            meta,
+            mechanism_data,
+            ..
+        } = gd.into_gelf();
+        let mut exception = SentryException {
+            values: meta
+                .into_iter()
+                .map(|(k, v)| SentryExceptionValue {
+                    r#type: k,
+                    value: v,
+                    mechanism: None,
+                })
+                .collect::<Vec<SentryExceptionValue>>(),
         };
 
-        let mut data = gelf_msg
-            .meta
-            .iter()
-            .map(|(k, v)| json!({ "value": v, "type": k,}))
-            .collect::<Vec<Value>>();
+        exception.values.push(SentryExceptionValue {
+            r#type: String::from("GelfException"),
+            value: Value::String(short_message),
+            mechanism: Some(SentryExceptionValueMechanism {
+                r#type: String::from("generic"),
+                data: mechanism_data,
+            }),
+        });
 
-        data.push(json!({
-            "value": gelf_msg.short_message,
-            "type": "GelfException",
-            "mechanism": {
-                "type": "generic",
-                "data": gelf_msg.mechanism_data
-            }
-        }));
-
-        Some(json!({
-            "event_id": uuid::Uuid::new_v4(),
-            "server_name": gelf_msg.host,
-            "timestamp": gelf_msg.timestamp,
-            "level": level,
-            "exception": {
-                "values": data
-            }
-        }))
+        SentryEvent {
+            event_id: uuid::Uuid::new_v4(),
+            server_name: host,
+            timestamp,
+            level: SentryLevels::from(level),
+            exception,
+        }
     }
 }

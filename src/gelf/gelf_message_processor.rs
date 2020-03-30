@@ -1,12 +1,15 @@
-use crate::gelf::gelf_reader::GelfReader;
+use crate::gelf::gelf_reader::GelfDataWrapper;
+use crate::sentry::sentry_processor::SentryEvent;
 use actix::prelude::*;
-use serde_json::Value;
 
-pub struct GelfProcessorMessage(pub GelfReader);
+/// Message, which contains parsed gelf data
+pub struct GelfProcessorMessage(pub GelfDataWrapper);
 impl Message for GelfProcessorMessage {
-    type Result = Option<Value>;
+    type Result = Option<SentryEvent>;
 }
 
+/// Simplest Gelf Processor Actor
+/// Just prints gelf message to stdio
 pub struct GelfPrinterActor;
 impl GelfPrinterActor {
     #[allow(dead_code)]
@@ -20,7 +23,7 @@ impl Actor for GelfPrinterActor {
 }
 
 impl Handler<GelfProcessorMessage> for GelfPrinterActor {
-    type Result = Option<Value>;
+    type Result = Option<SentryEvent>;
 
     fn handle(
         &mut self,

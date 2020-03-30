@@ -162,6 +162,28 @@ impl FromStr for GelfLevel {
 #[cfg(test)]
 mod reader {
     use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_gelf() {
+        let r = to_gelf({
+            let mut temp = Map::new();
+            temp.insert("version".to_string(), json!("1.1"));
+            temp.insert("host".to_string(), json!("example.org"));
+            temp.insert("short_message".to_string(), json!("A short message"));
+            temp.insert("_some_info".to_string(), json!("foo"));
+            temp.insert("level".to_string(), json!(5));
+            temp.insert("timestamp".to_string(), json!(1_582_213_226));
+            temp
+        })
+        .unwrap();
+
+        assert_eq!(r.version, "1.1");
+        assert_eq!(r.host, "example.org");
+        assert_eq!(r.short_message, "A short message");
+        assert_eq!(r.meta["some_info"], "foo");
+        assert!(matches!(r.level, GelfLevel::Notice))
+    }
 
     #[actix_rt::test]
     async fn test_actor() {

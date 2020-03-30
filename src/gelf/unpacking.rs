@@ -28,8 +28,8 @@ impl Handler<UnpackMessage> for UnPackActor {
         UnpackMessage(msg): UnpackMessage,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
-        let buf = msg.as_slice();
-        let mut parsed_buf = Vec::new();
+        let mut buf = msg.as_slice();
+        let mut parsed_buf = Vec::with_capacity(buf.len());
 
         if is_zlib(buf) {
             let mut zlib_decompressor = ZlibDecoder::new(buf);
@@ -40,7 +40,8 @@ impl Handler<UnpackMessage> for UnPackActor {
             let n = gzip_decompressor.read_to_end(&mut parsed_buf)?;
             parsed_buf.truncate(n)
         } else {
-            parsed_buf = Vec::from(buf);
+            let n = buf.read_to_end(&mut parsed_buf)?;
+            parsed_buf.truncate(n)
         }
         Ok(parsed_buf)
     }

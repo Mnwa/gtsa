@@ -69,3 +69,41 @@ fn is_zlib(buf: &[u8]) -> bool {
     }
     true
 }
+
+#[cfg(test)]
+mod unpacker {
+    use super::*;
+    use flate2::write::{GzEncoder, ZlibEncoder};
+    use flate2::Compression;
+    use std::io::Write;
+
+    #[test]
+    fn test_gzip() {
+        let mut e = GzEncoder::new(Vec::new(), Compression::default());
+        e.write_all(b"Test").unwrap();
+        assert!(is_gz(&e.finish().unwrap()));
+    }
+
+    #[test]
+    fn test_zlib() {
+        let mut e = ZlibEncoder::new(Vec::new(), Compression::default());
+        e.write_all(b"Test").unwrap();
+        assert!(is_zlib(&e.finish().unwrap()));
+    }
+
+    #[actix_rt::test]
+    async fn test_actor() {
+        let gelf_unpacker = UnPackActor::new(1);
+
+        let mut e = GzEncoder::new(Vec::new(), Compression::default());
+        e.write_all(b"Test").unwrap();
+
+        let r = gelf_unpacker
+            .send(UnpackMessage(e.finish().unwrap()))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(String::from_utf8(r).unwrap(), "Test");
+    }
+}

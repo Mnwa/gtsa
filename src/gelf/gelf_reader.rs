@@ -12,7 +12,7 @@ pub struct GelfDataWrapper {
 impl GelfDataWrapper {
     /// Create gelf data wrapper from json slice
     pub fn from_slice(buf: &[u8]) -> JsonResult<GelfDataWrapper> {
-        let data: Map<String, Value> = serde_json::from_slice(&buf)?;
+        let data: Map<String, Value> = serde_json::from_slice(buf)?;
 
         let data = to_gelf(data)?;
 
@@ -62,7 +62,7 @@ impl Handler<GelfMessage> for GelfReaderActor {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct GelfData {
     pub host: String,
     pub level: GelfLevel,
@@ -83,6 +83,7 @@ fn to_gelf(data: Map<String, Value>) -> JsonResult<GelfData> {
         "timestamp".to_string(),
         "version".to_string(),
     ];
+
     data.iter().for_each(|(k, v)| {
         match k.split_at(1) {
             ("_", field) => meta.insert(field.to_string(), v.to_owned()),
@@ -95,6 +96,8 @@ fn to_gelf(data: Map<String, Value>) -> JsonResult<GelfData> {
         host: data
             .get("host")
             .ok_or_else(|| JsonError::missing_field("host"))?
+            .as_str()
+            .ok_or_else(|| JsonError::invalid_type(Unexpected::Other("host"), &"string"))?
             .to_string(),
         level: data
             .get("level")
@@ -104,6 +107,8 @@ fn to_gelf(data: Map<String, Value>) -> JsonResult<GelfData> {
         short_message: data
             .get("short_message")
             .ok_or_else(|| JsonError::missing_field("short_message"))?
+            .as_str()
+            .ok_or_else(|| JsonError::invalid_type(Unexpected::Other("short_message"), &"string"))?
             .to_string(),
         timestamp: data
             .get("timestamp")
@@ -113,13 +118,15 @@ fn to_gelf(data: Map<String, Value>) -> JsonResult<GelfData> {
         version: data
             .get("version")
             .ok_or_else(|| JsonError::missing_field("version"))?
+            .as_str()
+            .ok_or_else(|| JsonError::invalid_type(Unexpected::Other("version"), &"string"))?
             .to_string(),
         meta,
         mechanism_data,
     })
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum GelfLevel {
     Emergency = 0,
     Alert = 1,
@@ -149,5 +156,37 @@ impl FromStr for GelfLevel {
                 &"integers from 0 to 7",
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod reader {
+    use super::*;
+
+    #[actix_rt::test]
+    async fn test_actor() {
+        let gelf_reader = GelfReaderActor::new(1);
+
+        let r = gelf_reader
+            .send(GelfMessage(
+                br#"{
+                    "version":"1.1",
+                    "host":"example.org",
+                    "short_message":"A short message",
+                    "level":5,
+                    "_some_info":"foo",
+                    "timestamp":1582213226
+                }"#
+                .to_vec(),
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(r.data.version, "1.1");
+        assert_eq!(r.data.host, "example.org");
+        assert_eq!(r.data.short_message, "A short message");
+        assert_eq!(r.data.meta["some_info"], "foo");
+        assert!(matches!(r.data.level, GelfLevel::Notice))
     }
 }

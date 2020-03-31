@@ -222,3 +222,94 @@ impl From<GelfDataWrapper> for SentryEvent {
         }
     }
 }
+
+#[cfg(test)]
+mod unpacker {
+    use super::*;
+
+    #[test]
+    fn test_conert() {
+        let s = SentryEvent::from(
+            GelfDataWrapper::from_slice(
+                br#"{
+                        "version":"1.1",
+                        "host":"example.org",
+                        "short_message":"A short message",
+                        "level":5,
+                        "_some_info":"foo",
+                        "timestamp":1582213226
+                    }"#,
+            )
+            .unwrap(),
+        );
+
+        assert!(matches!(s.level, SentryLevels::Warning));
+        assert_eq!(s.server_name, "example.org");
+        assert_eq!(
+            s.exception.values.last().unwrap().value.as_str().unwrap(),
+            "A short message"
+        );
+        assert_eq!(
+            s.exception
+                .values
+                .last()
+                .unwrap()
+                .mechanism
+                .as_ref()
+                .unwrap()
+                .r#type,
+            "generic"
+        );
+        assert_eq!(
+            s.exception.values.first().unwrap().value.as_str().unwrap(),
+            "foo"
+        );
+        assert_eq!(s.exception.values.first().unwrap().r#type, "some_info");
+    }
+
+    #[actix_rt::test]
+    async fn test_actor() {
+        let sentry_prepare = PrepareActor::new(1);
+
+        let s = sentry_prepare
+            .send(GelfProcessorMessage(
+                GelfDataWrapper::from_slice(
+                    br#"{
+                        "version":"1.1",
+                        "host":"example.org",
+                        "short_message":"A short message",
+                        "level":5,
+                        "_some_info":"foo",
+                        "timestamp":1582213226
+                    }"#,
+                )
+                .unwrap(),
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(s.level, SentryLevels::Warning));
+        assert_eq!(s.server_name, "example.org");
+        assert_eq!(
+            s.exception.values.last().unwrap().value.as_str().unwrap(),
+            "A short message"
+        );
+        assert_eq!(
+            s.exception
+                .values
+                .last()
+                .unwrap()
+                .mechanism
+                .as_ref()
+                .unwrap()
+                .r#type,
+            "generic"
+        );
+        assert_eq!(
+            s.exception.values.first().unwrap().value.as_str().unwrap(),
+            "foo"
+        );
+        assert_eq!(s.exception.values.first().unwrap().r#type, "some_info");
+    }
+}

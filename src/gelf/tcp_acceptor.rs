@@ -4,13 +4,14 @@ use crate::gelf::gelf_reader::{GelfMessage, GelfReaderActor};
 use actix::dev::ToEnvelope;
 use actix::prelude::*;
 use futures::prelude::*;
+use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio::prelude::io::AsyncReadExt;
 
 pub async fn new_tcp_acceptor<T, A>(
     bind_addr: T,
-    gelf_processor: Addr<A>,
-    reader: Addr<GelfReaderActor>,
+    gelf_processor: Arc<Addr<A>>,
+    reader: Arc<Addr<GelfReaderActor>>,
 ) where
     T: ToSocketAddrs,
     A: Actor + Handler<GelfProcessorMessage>,
@@ -25,8 +26,8 @@ where
     T: Actor + Handler<GelfProcessorMessage>,
     T::Context: ToEnvelope<T, GelfProcessorMessage>,
 {
-    reader: Addr<GelfReaderActor>,
-    gelf_processor: Addr<T>,
+    reader: Arc<Addr<GelfReaderActor>>,
+    gelf_processor: Arc<Addr<T>>,
 }
 
 impl<T> TcpActor<T>
@@ -36,8 +37,8 @@ where
 {
     pub fn new(
         listener: TcpListener,
-        gelf_processor: Addr<T>,
-        reader: Addr<GelfReaderActor>,
+        gelf_processor: Arc<Addr<T>>,
+        reader: Arc<Addr<GelfReaderActor>>,
     ) -> Addr<TcpActor<T>> {
         TcpActor::create(|ctx| {
             ctx.add_stream(read_tcp(listener));
@@ -69,8 +70,8 @@ where
     T::Context: ToEnvelope<T, GelfProcessorMessage>,
 {
     fn handle(&mut self, TcpPacket(mut socket): TcpPacket, ctx: &mut Context<Self>) {
-        let reader_actor = self.reader.clone();
-        let processor_actor = self.gelf_processor.clone();
+        let reader_actor = Arc::clone(&self.reader);
+        let processor_actor = Arc::clone(&self.gelf_processor);
 
         ctx.spawn(
             async move {

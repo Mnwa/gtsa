@@ -7,13 +7,14 @@ use crate::gelf::gelf_message_processor::GelfProcessorMessage;
 use crate::gelf::gelf_reader::{GelfData, GelfDataWrapper, GelfLevel};
 use reqwest::Client;
 use std::borrow::Cow;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 pub struct SentryProcessorActor {
     dsn: Dsn,
     client: Client,
-    prepare_actor: Addr<PrepareActor>,
+    prepare_actor: Arc<Addr<PrepareActor>>,
 }
 
 impl<'a> SentryProcessorActor {
@@ -39,7 +40,7 @@ impl<'a> SentryProcessorActor {
                 project,
             },
             client: Client::new(),
-            prepare_actor: PrepareActor::new(prepare_json_threads),
+            prepare_actor: Arc::new(PrepareActor::new(prepare_json_threads)),
         })
     }
 }
@@ -54,7 +55,7 @@ impl Handler<GelfProcessorMessage> for SentryProcessorActor {
     fn handle(&mut self, msg: GelfProcessorMessage, ctx: &mut Self::Context) -> Self::Result {
         let url = self.dsn.prepare_url();
 
-        let prepare_actor = self.prepare_actor.clone();
+        let prepare_actor = Arc::clone(&self.prepare_actor);
 
         let rb = self.client.post(url.as_str());
 

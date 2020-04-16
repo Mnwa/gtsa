@@ -13,12 +13,13 @@ use crate::gelf::error::GelfError;
 use lru::LruCache;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use std::sync::Arc;
 
 pub async fn new_udp_acceptor<T, A>(
     bind_addr: T,
-    gelf_processor: Addr<A>,
-    reader: Addr<GelfReaderActor>,
-    unpacker: Addr<UnPackActor>,
+    gelf_processor: Arc<Addr<A>>,
+    reader: Arc<Addr<GelfReaderActor>>,
+    unpacker: Arc<Addr<UnPackActor>>,
     max_parallel_chunks: usize,
 ) where
     T: ToSocketAddrs,
@@ -35,10 +36,10 @@ where
     T: Actor + Handler<GelfProcessorMessage>,
     T::Context: ToEnvelope<T, GelfProcessorMessage>,
 {
-    unpacker: Addr<UnPackActor>,
-    unchanker: Addr<ChunkAcceptor>,
-    reader: Addr<GelfReaderActor>,
-    gelf_processor: Addr<T>,
+    unpacker: Arc<Addr<UnPackActor>>,
+    unchanker: Arc<Addr<ChunkAcceptor>>,
+    reader: Arc<Addr<GelfReaderActor>>,
+    gelf_processor: Arc<Addr<T>>,
 }
 impl<T> UdpActor<T>
 where
@@ -47,9 +48,9 @@ where
 {
     pub fn new(
         recv: RecvHalf,
-        gelf_processor: Addr<T>,
-        reader: Addr<GelfReaderActor>,
-        unpacker: Addr<UnPackActor>,
+        gelf_processor: Arc<Addr<T>>,
+        reader: Arc<Addr<GelfReaderActor>>,
+        unpacker: Arc<Addr<UnPackActor>>,
         max_parallel_chunks: usize,
     ) -> Addr<UdpActor<T>> {
         UdpActor::create(|ctx| {
@@ -58,7 +59,7 @@ where
                 unpacker,
                 reader,
                 gelf_processor,
-                unchanker: ChunkAcceptor::new(max_parallel_chunks),
+                unchanker: Arc::new(ChunkAcceptor::new(max_parallel_chunks)),
             }
         })
     }
@@ -82,10 +83,10 @@ where
     T::Context: ToEnvelope<T, GelfProcessorMessage>,
 {
     fn handle(&mut self, UdpPacket(buf, _addr): UdpPacket, ctx: &mut Context<Self>) {
-        let reader_actor = self.reader.clone();
-        let processor_actor = self.gelf_processor.clone();
-        let unpacker_actor = self.unpacker.clone();
-        let unchanker_actor = self.unchanker.clone();
+        let reader_actor = Arc::clone(&self.reader);
+        let processor_actor = Arc::clone(&self.gelf_processor);
+        let unpacker_actor = Arc::clone(&self.unpacker);
+        let unchanker_actor = Arc::clone(&self.unchanker);
 
         ctx.spawn(
             async move {

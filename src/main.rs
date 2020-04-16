@@ -10,6 +10,7 @@ use gelf::gelf_reader::GelfReaderActor;
 use gelf::tcp_acceptor;
 use gelf::udp_acceptor;
 use gelf::unpacking::UnPackActor;
+use std::sync::Arc;
 
 fn main() {
     let dsn = env::var("SENTRY_DSN")
@@ -32,21 +33,21 @@ fn main() {
         .unwrap();
 
     let system = System::new(system_name);
-    let gelf_reader = GelfReaderActor::new(reader_threads);
-    let gelf_unpacker = UnPackActor::new(unpacker_threads);
-    let gelf_sentry_processor = SentryProcessorActor::new(&dsn, reader_threads);
+    let gelf_reader = Arc::new(GelfReaderActor::new(reader_threads));
+    let gelf_unpacker = Arc::new(UnPackActor::new(unpacker_threads));
+    let gelf_sentry_processor = Arc::new(SentryProcessorActor::new(&dsn, reader_threads));
     let _gelf_printer = GelfPrinterActor::new();
     actix::spawn(udp_acceptor::new_udp_acceptor(
         udp_addr,
-        gelf_sentry_processor.clone(),
-        gelf_reader.clone(),
+        Arc::clone(&gelf_sentry_processor),
+        Arc::clone(&gelf_reader),
         gelf_unpacker,
         max_parallel_chunks,
     ));
     actix::spawn(tcp_acceptor::new_tcp_acceptor(
         tcp_addr,
-        gelf_sentry_processor,
-        gelf_reader,
+        Arc::clone(&gelf_sentry_processor),
+        Arc::clone(&gelf_reader),
     ));
     system.run().unwrap();
 }

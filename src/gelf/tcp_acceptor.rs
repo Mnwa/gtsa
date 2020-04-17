@@ -76,7 +76,7 @@ where
         ctx.spawn(
             async move {
                 loop {
-                    let mut buf = Vec::with_capacity(8196);
+                    let mut buf = Vec::with_capacity(99 * 8192);
                     let n = socket
                         .read_to_end(&mut buf)
                         .await

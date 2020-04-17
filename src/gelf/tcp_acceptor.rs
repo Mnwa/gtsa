@@ -75,23 +75,22 @@ where
 
         ctx.spawn(
             async move {
-                let mut buf = Vec::new();
                 loop {
-                    let gelf_message = socket
+                    let mut buf = Vec::with_capacity(8196);
+                    let n = socket
                         .read_to_end(&mut buf)
                         .await
                         .map_err(|e| GelfError::from_err("failed to read from socket", e))
                         .and_then(|n| match n {
                             0 => Err(GelfError::new("socket closed")),
                             _ => Ok(n),
-                        })
-                        .map(|n| {
-                            buf.truncate(n - 1);
-                            GelfMessage(buf.clone())
                         });
 
-                    let gelf_message = match gelf_message {
-                        Ok(m) => m,
+                    let gelf_message = match n {
+                        Ok(n) => {
+                            buf.truncate(n - 1);
+                            GelfMessage(buf)
+                        }
                         Err(e) => {
                             eprintln!("{}", e);
                             return;
@@ -103,10 +102,7 @@ where
                         .await
                         .map_err(|e| GelfError::from_err("gelf actor mailing error", e))
                         .and_then(|reader| {
-                            reader.map_err(|e| {
-                                println!("Original response: {}", String::from_utf8_lossy(&buf));
-                                GelfError::from_err("tcp parsing gelf error", e)
-                            })
+                            reader.map_err(|e| GelfError::from_err("tcp parsing gelf error", e))
                         })
                         .map(GelfProcessorMessage);
 
@@ -122,8 +118,6 @@ where
                         eprintln!("{}", GelfError::from_err("gelf actor processing error", e));
                         return;
                     }
-
-                    buf.clear()
                 }
             }
             .into_actor(self),

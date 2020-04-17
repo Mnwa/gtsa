@@ -226,7 +226,7 @@ impl Handler<UnchankMessage> for ChunkAcceptor {
                 }
                 None => {
                     let b_h = {
-                        let mut temp = BinaryHeap::with_capacity(1);
+                        let mut temp = BinaryHeap::with_capacity(10);
                         temp.push(chunk);
                         temp
                     };

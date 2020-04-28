@@ -28,7 +28,7 @@ fn main() {
         .parse()
         .unwrap();
     let max_parallel_chunks: usize = std::env::var("MAX_PARALLEL_CHUNKS")
-        .unwrap_or_else(|_| "100000".to_string())
+        .unwrap_or_else(|_| "500".to_string())
         .parse()
         .unwrap();
 

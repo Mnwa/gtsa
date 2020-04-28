@@ -8,12 +8,11 @@ use std::net::SocketAddr;
 use tokio::net::udp::RecvHalf;
 use tokio::net::{ToSocketAddrs, UdpSocket};
 
-extern crate lru;
 use crate::gelf::error::GelfError;
-use lru::LruCache;
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 pub async fn new_udp_acceptor<T, A>(
     bind_addr: T,
@@ -179,13 +178,15 @@ impl Message for UnchankMessage {
 }
 
 struct ChunkAcceptor {
-    chunked_messages: LruCache<String, BinaryHeap<MessageChunk>>,
+    chunked_messages: HashMap<String, (SystemTime, BinaryHeap<MessageChunk>)>,
+    max_parallel_chunks: usize,
 }
 
 impl ChunkAcceptor {
     fn new(max_parallel_chunks: usize) -> Addr<ChunkAcceptor> {
         ChunkAcceptor::create(|_| ChunkAcceptor {
-            chunked_messages: LruCache::new(max_parallel_chunks),
+            chunked_messages: HashMap::with_capacity(max_parallel_chunks),
+            max_parallel_chunks,
         })
     }
 }
@@ -206,32 +207,52 @@ impl Handler<UnchankMessage> for ChunkAcceptor {
             let chunk = MessageChunk::new(buf);
 
             let message_id = chunk.message_id.clone();
+            let sequence_count = chunk.sequence_count;
 
-            match self.chunked_messages.get_mut(&message_id) {
-                Some(chunks) => {
-                    let sequence_count = chunk.sequence_count;
-                    chunks.push(chunk);
-                    if sequence_count == chunks.len() as u8 {
-                        let parsed_buf = chunks
-                            .clone()
-                            .into_sorted_vec()
-                            .into_iter()
-                            .flat_map(|chunk| chunk.message_chunk.into_iter())
-                            .collect();
+            let (_, chunks) = self
+                .chunked_messages
+                .entry(message_id.clone())
+                .or_insert_with(|| (SystemTime::now(), BinaryHeap::with_capacity(128)));
 
-                        self.chunked_messages.pop(&message_id);
+            chunks.push(chunk);
+            let chunks_len = { chunks.len() as u8 };
 
-                        return Some(parsed_buf);
-                    }
+            if self.chunked_messages.len() == self.max_parallel_chunks {
+                let invalid_keys: Vec<String> = self
+                    .chunked_messages
+                    .iter()
+                    .filter_map(|(k, (t, _))| {
+                        if t.elapsed().ok()?.as_secs() > 5 {
+                            return Some(k.clone());
+                        }
+                        None
+                    })
+                    .collect();
+
+                let invalid_keys: Option<Vec<BinaryHeap<MessageChunk>>> = invalid_keys
+                    .iter()
+                    .map(|k| self.chunked_messages.remove(k))
+                    .map(|v| v.map(|(_, v)| v))
+                    .collect();
+
+                if let Some(invalid_keys) = invalid_keys {
+                    println!("keys successfull cleared: {:#?}", invalid_keys)
+                } else {
+                    eprintln!("Fail to clear chunks hashmap")
                 }
-                None => {
-                    let b_h = {
-                        let mut temp = BinaryHeap::with_capacity(10);
-                        temp.push(chunk);
-                        temp
-                    };
-                    self.chunked_messages.put(message_id, b_h);
-                }
+            }
+
+            if sequence_count == chunks_len {
+                let parsed_buf: Vec<u8> = self
+                    .chunked_messages
+                    .remove(&message_id)?
+                    .1
+                    .into_sorted_vec()
+                    .into_iter()
+                    .flat_map(|chunk| chunk.message_chunk.into_iter())
+                    .collect();
+
+                return Some(parsed_buf);
             }
 
             None
@@ -241,7 +262,7 @@ impl Handler<UnchankMessage> for ChunkAcceptor {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct MessageChunk {
     message_id: String,
     sequence_number: u8,
@@ -252,7 +273,7 @@ struct MessageChunk {
 impl MessageChunk {
     fn new(buf: Vec<u8>) -> MessageChunk {
         MessageChunk {
-            message_id: std::string::String::from_utf8_lossy(&buf[2..9]).to_string(),
+            message_id: std::string::String::from_utf8_lossy(&buf[2..9]).into_owned(),
             sequence_number: buf[10],
             sequence_count: buf[11],
             message_chunk: buf[12..].to_vec(),
@@ -286,4 +307,39 @@ fn is_chunk(buf: &[u8]) -> bool {
         return false;
     }
     true
+}
+
+#[cfg(test)]
+mod acceptor {
+    use crate::gelf::udp_acceptor::{ChunkAcceptor, UnchankMessage};
+
+    #[actix_rt::test]
+    async fn test_unpacker() {
+        let unpacker_actor = ChunkAcceptor::new(5);
+
+        let message_1 = {
+            let mut temp = vec![30, 15];
+            temp.append(&mut vec![1, 2, 3, 4, 5, 6, 7, 8]);
+            temp.append(&mut vec![0, 2]);
+            temp.append(&mut b"test".to_vec());
+            temp
+        };
+        let message_2 = {
+            let mut temp = vec![30, 15];
+            temp.append(&mut vec![1, 2, 3, 4, 5, 6, 7, 8]);
+            temp.append(&mut vec![1, 2]);
+            temp.append(&mut b"test".to_vec());
+            temp
+        };
+        let response_1 = unpacker_actor
+            .send(UnchankMessage(message_1))
+            .await
+            .unwrap();
+        assert_eq!(response_1, None);
+        let response_2 = unpacker_actor
+            .send(UnchankMessage(message_2))
+            .await
+            .unwrap();
+        assert_eq!(response_2, Some(b"testtest".to_vec()))
+    }
 }

@@ -133,6 +133,7 @@ impl Handler<GelfProcessorMessage> for PrepareActor {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 enum SentryLevels {
     Fatal,
     Error,

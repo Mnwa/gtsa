@@ -97,7 +97,7 @@ struct Dsn {
 impl Dsn {
     fn prepare_url(&self) -> String {
         format!(
-            "{}://{}/api/{}/store/?sentry_version=5&sentry_key={}&sentry_timestamp={}",
+            "{}://{}/api/{}/store/?sentry_version=7&sentry_client=gtsa&sentry_key={}&sentry_timestamp={}",
             self.protocol,
             self.host,
             self.project,
